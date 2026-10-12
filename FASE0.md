@@ -3,7 +3,7 @@
 | # | Item | Quem | Status |
 |---|---|---|---|
 | 0.1 | Projeto no Supabase "DividaZero" (São Paulo, PostgreSQL 17 — chaves e senha testadas) | Edval | ✅ |
-| 0.2 | Conta na Pluggy + Application | Edval | ⬜ |
+| 0.2 | Conta na Pluggy + Application (chaves testadas; MeuPluggy e bancos PF/PJ disponíveis) | Edval | ✅ |
 | 0.3 | Conta no Resend + API key | Edval | ⬜ |
 | 0.4 | Token da brapi.dev (testado: cotação real ok) | Edval | ✅ |
 | 0.5 | Repositório privado no GitHub (github.com/IbyangaEdi/FinancasFamilia) | Claude | ✅ |
