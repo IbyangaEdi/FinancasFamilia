@@ -166,6 +166,10 @@ svg text{font-family:var(--font)}
 /* modal */
 .modal{position:fixed;inset:0;background:var(--overlay);display:grid;place-items:center;padding:16px;z-index:50;overflow:auto}
 .modal .card{width:min(560px,100%);max-height:calc(100% - 16px);overflow:auto}
+.modal .card.wide{width:min(1040px,100%)}
+.imp-tbl{min-width:820px}
+.imp-tbl select{padding:4px 8px;font-size:12.5px;width:100%;min-width:150px}
+.imp-tbl tr.off td{opacity:.5}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;font-weight:600;z-index:60;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
 
 /* login */
@@ -375,8 +379,13 @@ const KEY = 'financas-familia-prototipo-v4';
 let S = null;
 try { S = JSON.parse(localStorage.getItem(KEY)); } catch (e) { S = null; }
 if (!S || S.v !== 4) S = seed();
-S.ui.pessoa = S.ui.pessoa || 'pf';
-S.ui.proj = S.ui.proj || { periodo: '36', de: addM(CUR, -11), ate: addM(CUR, 24) };
+/* campos que versões novas do protótipo acrescentaram; vale para dados salvos e para "Restaurar exemplo" */
+function completarEstado() {
+  S.ui.proj = S.ui.proj || { periodo: '36', de: addM(CUR, -11), ate: addM(CUR, 24) };
+  S.ui.pessoa = S.ui.pessoa || 'pf';
+  S.regras = S.regras || {}; S.csvMap = S.csvMap || {}; S.importacoes = S.importacoes || [];
+}
+completarEstado();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* sem armazenamento: segue em memória */ } };
 
 const me = () => S.users.find(u => u.id === S.session);
@@ -776,6 +785,7 @@ VIEWS.contas = () => {
           <button data-act="pessoa" data-v="pf" aria-pressed="${pes === 'pf'}">Pessoal (PF)</button>
           <button data-act="pessoa" data-v="pj" aria-pressed="${pes === 'pj'}">Empresa (PJ)</button>
         </div>
+        <button class="btn ghost" data-act="importar" data-id="">Importar arquivo</button>
         <button class="btn primary" data-act="novo">+ Novo lançamento</button>
       </div>
     </div>
@@ -798,7 +808,7 @@ VIEWS.contas = () => {
         const [cls, txt] = situacao(l); const dono = l.ownerId === S.session;
         return `<tr class="${l.pago ? 'is-paid' : ''}">
           <td><button class="chk" data-act="pago" data-id="${l.id}" aria-pressed="${l.pago}" aria-label="Marcar ${esc(l.descricao)} como ${l.tipo === 'receita' ? 'recebida' : 'paga'}">${CHECK_SVG}</button></td>
-          <td><div class="desc">${esc(l.descricao)}</div><div class="meta">${l.compra ? 'Compra ' + dLabel(l.compra) + ' · ' : ''}${l.parcela ? 'Parcela ' + l.parcela + ' · ' : ''}${grupo ? esc(userName(l.ownerId)) : (l.compartilhado ? 'Compartilhado' : 'Só você')}</div></td>
+          <td><div class="desc">${esc(l.descricao)}</div><div class="meta">${l.compra ? 'Compra ' + dLabel(l.compra) + ' · ' : ''}${l.parcela ? 'Parcela ' + l.parcela + ' · ' : ''}${grupo ? esc(userName(l.ownerId)) : (l.compartilhado ? 'Compartilhado' : 'Só você')}${l.fitid ? ' · conferido no extrato' : ''}</div></td>
           <td>${l.tipo === 'receita' ? `<span class="pill acc">${esc(l.categoria)}</span>` : `<span class="pill ${l.essencial ? 'neutral' : 'gold'}">${esc(l.categoria)}</span>`}</td>
           <td>${tag(l.contaId)}</td>
           <td class="num">${dLabel(l.venc)}${isCard(l) ? '<div class="meta">fatura</div>' : ''}</td>
@@ -846,11 +856,12 @@ function contaTile(c, s) {
       <button class="btn primary sm" type="submit">Salvar</button><button class="btn ghost sm" type="button" data-act="saldoedit" data-id="">Cancelar</button>
     </form>` : ''}
     <div class="row">
+      ${own ? `<button class="btn primary sm" data-act="importar" data-id="${c.id}">Importar extrato</button>` : ''}
       ${own && saldoEdit !== c.id ? `<button class="btn ghost sm" data-act="saldoedit" data-id="${c.id}">Ajustar saldo</button>` : ''}
       <button class="btn link sm" data-act="vercontas" data-id="${c.id}">Ver lançamentos</button>
       ${own ? delContaBtn(c) : ''}
     </div>
-    <p class="meta">Saldo informado em ${dLabel(c.dataSaldo)}. Depois disso, entra o que foi marcado como recebido e sai o que foi marcado como pago.</p>
+    <p class="meta">${ultImport(c)} · Saldo de referência em ${dLabel(c.dataSaldo)}; depois disso, entra o que foi recebido e sai o que foi pago.</p>
   </article>`;
 }
 
@@ -870,9 +881,10 @@ function cardTile({ c, aberta, usado }) {
     </div>
     ${itens.length ? `<div class="kv">${top.map(l => `<span>${esc(l.descricao)}${l.parcela ? ' (' + l.parcela + ')' : ''}</span><span class="num">${BRL(l.valor)}</span>`).join('')}
       ${resto.length ? `<span class="faint">+ ${resto.length} ${resto.length === 1 ? 'compra' : 'compras'}${priv.length ? ' (inclui itens privados)' : ''}</span><span class="num faint">${BRL(sum(resto, l => l.valor))}</span>` : ''}</div>` : ''}
-    <p class="meta">Paga pela ${esc(contaLabel(contaById(c.pagaCom)))}</p>
+    <p class="meta">Paga pela ${esc(contaLabel(contaById(c.pagaCom)))} · ${ultImport(c)}</p>
     <div class="row">
-      ${aberta ? `<button class="btn primary sm" data-act="pagarfatura" data-card="${c.id}" data-venc="${aberta.venc}">Pagar fatura</button>` : ''}
+      ${own ? `<button class="btn primary sm" data-act="importar" data-id="${c.id}">Importar fatura</button>` : ''}
+      ${aberta ? `<button class="btn ghost sm" data-act="pagarfatura" data-card="${c.id}" data-venc="${aberta.venc}">Pagar fatura</button>` : ''}
       <button class="btn link sm" data-act="vercontas" data-id="${c.id}">Ver compras</button>
       ${own ? delContaBtn(c) : ''}
     </div>
@@ -1249,7 +1261,264 @@ function readModal() {
   if (g('m-pago')) e.pago = g('m-pago').checked;
   if (g('m-rep')) { e.rep = g('m-rep').value; e.n = parseInt(g('m-n').value, 10); }
 }
-const closeModal = () => { modalRoot.innerHTML = ''; editState = null; };
+const closeModal = () => { modalRoot.innerHTML = ''; editState = null; imp = null; };
+
+/* ---------- importação de extratos e faturas (OFX / CSV) ---------- */
+const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const addDia = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d); };
+const ultImport = c => { const u = S.importacoes.filter(x => x.contaId === c.id).slice(-1)[0]; return u ? `Último arquivo importado em ${dLabel(u.data)}` : 'Nenhum arquivo importado ainda'; };
+const REGRAS_PF = [
+  [/IFOOD|RAPPI|UBER ?EATS|AIQFOME|ZE DELIVERY/, 'Delivery'],
+  [/NETFLIX|SPOTIFY|DISNEY|HBO|\bMAX\b|PRIME VIDEO|AMAZON PRIME|YOUTUBE|GLOBOPLAY|DEEZER|PARAMOUNT|APPLE ?TV/, 'Assinaturas'],
+  [/STEAM|PLAYSTATION|XBOX|NINTENDO|GOOGLE ?PLAY|APPLE ?COM|APP ?STORE/, 'Apps e jogos'],
+  [/SMART ?FIT|ACADEMIA|BLUEFIT|BODYTECH|GYMPASS|WELLHUB|SELFIT/, 'Academia e bem-estar'],
+  [/\bUBER\b|\b99 ?(APP|POP|TAXI)\b|POSTO|SHELL|IPIRANGA|PETROBRAS|COMBUSTIVEL|ESTACIONAMENTO|SEM PARAR|CONECTCAR|VELOE/, 'Transporte'],
+  [/SUPERMERC|MERCADO(?! ?LIVRE| ?PAGO)|ATACAD|ASSAI|CARREFOUR|PAO DE ACUCAR|HORTIFRUTI|PALATO|GBARBOSA|BOMPRECO/, 'Mercado'],
+  [/FARMACIA|DROGA|RAIA|PAGUE MENOS|PANVEL|HOSPITAL|CLINICA|LABORAT|UNIMED|HAPVIDA|AMIL|SULAMERICA/, 'Saúde'],
+  [/ENERGIA|EQUATORIAL|ENEL|CEMIG|COPEL|NEOENERGIA|COELBA|SANEAMENTO|SABESP|CASAL|EMBASA|COMPESA|CAGECE|\bAGUA\b|VIVO|CLARO|\bTIM\b|\bOI\b|INTERNET|GAS NATURAL/, 'Contas da casa'],
+  [/CONDOMINIO|ALUGUEL|IPTU|HABITACIONAL/, 'Moradia'],
+  [/ESCOLA|COLEGIO|FACULDADE|UNIVERSIDADE|CURSO/, 'Educação'],
+  [/RESTAUR|LANCHONETE|PIZZ|BURGER|MC ?DONALDS|OUTBACK|PADARIA|CAFE|SUSHI|CHURRASC|\bBAR\b/, 'Restaurantes'],
+  [/AMAZON|MERCADO ?LIVRE|MAGALU|MAGAZINE LUIZA|SHOPEE|SHEIN|ALIEXPRESS|AMERICANAS|CASAS BAHIA|KABUM/, 'Compras'],
+  [/RENNER|RIACHUELO|ZARA|CENTAURO|NETSHOES|HERING|MARISA/, 'Vestuário'],
+  [/CINEMA|CINEMARK|INGRESSO|SYMPLA|EVENTIM|TEATRO/, 'Lazer'],
+  [/EMPRESTIMO|FINANCIAMENTO|CONSORCIO/, 'Dívidas e parcelas']
+];
+const REGRAS_REC = [[/SALARIO|PROVENTOS|FOLHA/, 'Salário'], [/RENDIMENTO|JUROS|DIVIDEND|JCP/, 'Rendimentos'], [/ALUGUEL/, 'Aluguel recebido']];
+const REGRAS_PJ = [[/\bDAS\b|SIMPLES NACIONAL|DARF|\bGPS\b|INSS|\bISS\b|IRPJ|CSLL|COFINS/, 'Impostos'], [/PRO ?LABORE/, 'Pró-labore'], [/CONTAB|CONTADOR|ADVOC/, 'Serviços contratados'], [/GOOGLE|MICROSOFT|ADOBE|AWS|NOTION|SLACK|ZOOM|CANVA|GITHUB|OPENAI|ANTHROPIC|HOSTINGER|REGISTRO BR/, 'Softwares e assinaturas']];
+/* a regra aprendida usa as duas primeiras palavras "de verdade" da descrição */
+const chaveRegra = d => norm(d).replace(/\b\d+\b/g, ' ').split(' ').filter(w => w.length > 2).slice(0, 2).join(' ');
+const regraId = (pj, tipo, d) => `${pj ? 'pj' : 'pf'}|${tipo}|${chaveRegra(d)}`;
+function sugerirCat(desc, tipo, pj) {
+  const r = S.regras[regraId(pj, tipo, desc)]; if (r) return { cat: r, aprendida: true };
+  const n = norm(desc), lista = tipo === 'receita' ? (pj ? [[/./, 'Faturamento']] : REGRAS_REC) : (pj ? REGRAS_PJ : REGRAS_PF);
+  for (const [re, c] of lista) if (re.test(n)) return { cat: c };
+  const cs = catsPara(tipo, pj); return { cat: cs[cs.length - 1] };
+}
+function decodeArquivo(buf) {
+  let t = new TextDecoder('utf-8').decode(buf);
+  if (t.includes('�')) t = new TextDecoder('windows-1252').decode(buf);
+  return t;
+}
+const numBR = s => {
+  s = String(s).trim(); const neg = /^\(.*\)$/.test(s) || /^-|-$/.test(s);
+  s = s.replace(/[()R$\s+-]/g, '');
+  if (s.includes(',') && s.includes('.')) s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  else if (s.includes(',')) s = s.replace(',', '.');
+  const v = parseFloat(s); return isFinite(v) ? (neg ? -v : v) : NaN;
+};
+function parseOFX(txt) {
+  const tag = (b, t) => { const m = b.match(new RegExp('<' + t + '>\\s*([^<\\r\\n]*)', 'i')); return m ? m[1].trim() : ''; };
+  const dt = s => /^\d{8}/.test(s) ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : '';
+  const trans = txt.split(/<STMTTRN>/i).slice(1).map(b => b.split(/<\/STMTTRN>/i)[0]).map(b => {
+    const nome = tag(b, 'NAME'), memo = tag(b, 'MEMO');
+    return { data: dt(tag(b, 'DTPOSTED')), valor: numBR(tag(b, 'TRNAMT')), fitid: tag(b, 'FITID'), desc: (nome && memo && !memo.includes(nome) ? nome + ' ' + memo : memo || nome || tag(b, 'TRNTYPE')).trim() };
+  }).filter(t => t.data && isFinite(t.valor));
+  const lb = txt.match(/<LEDGERBAL>([\s\S]*?)(<\/LEDGERBAL>|<AVAILBAL>|<\/STMTRS>|<\/CCSTMTRS>)/i);
+  const saldo = lb ? { valor: numBR(tag(lb[1], 'BALAMT')), data: dt(tag(lb[1], 'DTASOF')) } : null;
+  return { formato: 'OFX', cartao: /<CCSTMTRS>/i.test(txt), trans, saldo: saldo && isFinite(saldo.valor) && saldo.data ? saldo : null, banco: tag(txt, 'ORG') || tag(txt, 'BANKID') };
+}
+function splitCSV(txt) {
+  const linhas = txt.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
+  if (!linhas.length) return [];
+  const d = (linhas[0].match(/;/g) || []).length > (linhas[0].match(/,/g) || []).length ? ';' : (linhas[0].includes('\t') ? '\t' : ',');
+  return linhas.map(l => { const out = []; let cur = '', q = false;
+    for (let i = 0; i < l.length; i++) { const ch = l[i];
+      if (q) { if (ch === '"' && l[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+      else if (ch === '"') q = true; else if (ch === d) { out.push(cur); cur = ''; } else cur += ch; }
+    out.push(cur); return out.map(x => x.trim()); });
+}
+const dataBR = s => { s = String(s).trim(); let m;
+  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})/))) return `${m[1]}-${m[2]}-${m[3]}`;
+  if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/))) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${pad(+m[2])}-${pad(+m[1])}`;
+  return ''; };
+function autoMap(h) {
+  const f = re => h.findIndex(x => re.test(norm(x)));
+  return { data: f(/^(DATA|DATE|DT)\b/), desc: f(/DESCRI|HISTORICO|TITLE|ESTABELEC|LANCAMENTO|MEMO|DETALHE/), valor: f(/VALOR|AMOUNT|MONTANTE|QUANTIA/), id: f(/IDENTIFICADOR|^ID$/), inverter: false };
+}
+function csvTrans(rows, map) {
+  const vistos = {};
+  return rows.slice(1).map(r => ({ data: dataBR(r[map.data]), valor: numBR(r[map.valor]) * (map.inverter ? -1 : 1), desc: r[map.desc] || '', fitid: map.id >= 0 ? r[map.id] : '' }))
+    .filter(t => t.data && isFinite(t.valor))
+    .map(t => { if (t.fitid) return t; const base = `${t.data}|${t.valor.toFixed(2)}|${norm(t.desc)}`; vistos[base] = (vistos[base] || 0) + 1; return { ...t, fitid: 'h:' + base + '|' + vistos[base] }; });
+}
+/* monta a tela de conferência: o que é novo, o que já existe, o que paga fatura */
+function montarRevisao(conta, parsed) {
+  const pj = pessoaC(conta) === 'pj', card = conta.tipo === 'cartao';
+  let trans = parsed.trans.slice().sort((a, b) => a.data.localeCompare(b.data));
+  if (card && trans.filter(t => t.valor > 0).length > trans.length / 2) trans = trans.map(t => ({ ...t, valor: -t.valor }));
+  const usados = new Set(), fitids = new Set(S.lanc.filter(l => l.contaId === conta.id && l.fitid).map(l => l.fitid));
+  const cartoesPagos = S.contas.filter(k => k.tipo === 'cartao' && k.pagaCom === conta.id);
+  const ref = l => card ? (l.compra || l.venc) : (l.pago && l.pagoEm ? l.pagoEm : l.venc);
+  return trans.map((t, i) => {
+    const tipo = t.valor < 0 ? 'despesa' : 'receita', valor = Math.round(Math.abs(t.valor) * 100) / 100;
+    const r = { i, data: t.data, desc: t.desc, valor, tipo, fitid: t.fitid, incluir: true, status: 'nova', parcela: null };
+    const mp = card && t.desc.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*$/);
+    if (mp && +mp[1] >= 1 && +mp[1] <= +mp[2] && +mp[2] > 1) r.parcela = `${+mp[1]}/${+mp[2]}`;
+    if (fitids.has(t.fitid)) { r.status = 'dup'; r.incluir = false; }
+    else if (card && tipo === 'receita') { r.status = 'pgto'; r.incluir = false; }
+    else {
+      if (!card && tipo === 'despesa') for (const k of cartoesPagos) {
+        const f = faturas(k).find(f => !f.pago && !usados.has('f|' + k.id + f.venc) && Math.abs(f.valor - valor) <= Math.max(1, f.valor * .01));
+        if (f) { usados.add('f|' + k.id + f.venc); Object.assign(r, { status: 'fatura', fatura: { cardId: k.id, venc: f.venc } }); break; }
+      }
+      if (r.status === 'nova') {
+        const c = S.lanc.filter(l => !usados.has(l.id) && !l.fitid && l.tipo === tipo && (l.contaId === conta.id || (!l.contaId && l.ownerId === S.session))
+            && Math.abs(l.valor - valor) <= Math.max(.5, l.valor * .03) && Math.abs(days(ref(l), t.data)) <= 10)
+          .sort((a, b) => (Math.abs(a.valor - valor) - Math.abs(b.valor - valor)) || (Math.abs(days(ref(a), t.data)) - Math.abs(days(ref(b), t.data))))[0];
+        if (c) { usados.add(c.id); Object.assign(r, { status: 'match', matchId: c.id }); }
+      }
+    }
+    const m = r.matchId && S.lanc.find(l => l.id === r.matchId);
+    const sug = m ? { cat: m.categoria } : r.status === 'fatura' ? { cat: '' } : sugerirCat(t.desc, tipo, pj);
+    r.catSug = r.cat = sug.cat; r.aprendida = !!sug.aprendida;
+    return r;
+  });
+}
+let imp = null;
+function abrirImport(contaId) { imp = { contaId: contaId || (contasUsaveis().find(c => c.ownerId === S.session) || {}).id || '', step: 'arquivo', erro: '' }; drawImport(); }
+function irRevisao(parsed) {
+  const c = contaById(imp.contaId);
+  if (!c) { imp.erro = 'Escolha a conta ou o cartão do arquivo.'; imp.step = 'arquivo'; drawImport(); return; }
+  if (!parsed.trans.length) { imp.erro = 'Não encontrei transações neste arquivo. Confira se é o extrato/fatura em OFX ou CSV.'; imp.step = 'arquivo'; drawImport(); return; }
+  if (parsed.cartao && c.tipo !== 'cartao') imp.aviso = 'Este arquivo parece ser de cartão de crédito, mas você escolheu uma conta. Confira antes de importar.';
+  else if (parsed.formato === 'OFX' && !parsed.cartao && c.tipo === 'cartao') imp.aviso = 'Este arquivo parece ser de conta corrente, mas você escolheu um cartão. Confira antes de importar.';
+  else imp.aviso = '';
+  imp.rows = montarRevisao(c, parsed); imp.saldo = c.tipo === 'conta' ? parsed.saldo : null; imp.aplicarSaldo = !!imp.saldo;
+  const ds = parsed.trans.map(t => t.data).sort(); imp.periodo = [ds[0], ds[ds.length - 1]]; imp.formato = parsed.formato;
+  imp.step = 'revisar'; imp.erro = ''; drawImport();
+}
+function processarArquivo(nome, txt) {
+  imp.nome = nome; imp.erro = '';
+  if (/<OFX>|OFXHEADER/i.test(txt)) { irRevisao(parseOFX(txt)); return; }
+  const rows = splitCSV(txt);
+  if (rows.length < 2 || rows[0].length < 2) { imp.erro = 'Formato não reconhecido. Use o arquivo OFX ou CSV exportado pelo banco.'; drawImport(); return; }
+  const map = S.csvMap[imp.contaId] && S.csvMap[imp.contaId].n === rows[0].length ? S.csvMap[imp.contaId] : autoMap(rows[0]);
+  imp.csv = { rows, map };
+  if (map.data < 0 || map.valor < 0 || map.desc < 0) { imp.step = 'mapear'; drawImport(); return; }
+  irRevisao({ formato: 'CSV', trans: csvTrans(rows, map), saldo: null });
+}
+function confirmarImport() {
+  const c = contaById(imp.contaId), card = c.tipo === 'cartao', pj = pessoaC(c) === 'pj';
+  const res = { novos: 0, casados: 0, faturas: 0, regras: 0 };
+  for (const r of imp.rows) {
+    if (!r.incluir || r.status === 'dup' || r.status === 'pgto') continue;
+    if (r.cat && r.cat !== r.catSug) { S.regras[regraId(pj, r.tipo, r.desc)] = r.cat; res.regras++; }
+    if (r.status === 'fatura') {
+      toggleFatura(r.fatura.cardId, r.fatura.venc, true);
+      S.lanc.filter(l => l.contaId === r.fatura.cardId && l.venc === r.fatura.venc).forEach(l => { l.pagoEm = r.data; });
+      res.faturas++; continue;
+    }
+    if (r.status === 'match') {
+      const l = S.lanc.find(x => x.id === r.matchId);
+      Object.assign(l, { fitid: r.fitid, valor: r.valor, categoria: r.cat, contaId: c.id });
+      if (r.tipo === 'despesa' && CATS[r.cat]) l.essencial = CATS[r.cat].e;
+      if (!card) { l.pago = true; l.pagoEm = r.data; }
+      res.casados++; continue;
+    }
+    const venc = card ? faturaVenc(c, r.data) : r.data, faturaPassada = card && venc < HOJE;
+    S.lanc.push({ id: uid(), ownerId: S.session, tipo: r.tipo, descricao: r.desc.slice(0, 80), valor: r.valor, venc, compra: card ? r.data : null, contaId: c.id,
+      categoria: r.cat, essencial: r.tipo === 'despesa' ? !!(CATS[r.cat] && CATS[r.cat].e) : true, pago: card ? faturaPassada : true,
+      pagoEm: card ? (faturaPassada ? venc : null) : r.data, compartilhado: c.compartilhado, parcela: r.parcela, fitid: r.fitid, origem: 'importado' });
+    res.novos++;
+  }
+  if (imp.saldo && imp.aplicarSaldo) { c.saldo = imp.saldo.valor; c.dataSaldo = addDia(imp.saldo.data, 1); }
+  S.importacoes.push({ id: uid(), contaId: c.id, arquivo: imp.nome, data: HOJE, ...res });
+  return res;
+}
+/* extrato fictício, para testar sem baixar nada do banco */
+function gerarOFXExemplo(c) {
+  const card = c.tipo === 'cartao', L = [];
+  const add = (data, valor, desc, jaRefletido) => L.push({ data, valor: Math.round(valor * 100) / 100, desc, jaRefletido, fitid: `EX${data.replace(/-/g, '')}${Math.abs(Math.round(valor * 100))}${norm(desc).replace(/ /g, '').slice(0, 12)}` });
+  if (!card) {
+    S.lanc.filter(l => l.contaId === c.id && l.venc.startsWith(CUR) && l.venc <= HOJE && !l.fitid).slice(0, 5)
+      .forEach((l, i) => add(l.pago && l.pagoEm ? l.pagoEm : l.venc, (l.tipo === 'receita' ? 1 : -1) * (i === 1 ? l.valor * 1.028 : l.valor), l.descricao.toUpperCase(), l.pago && (l.pagoEm || l.venc) >= c.dataSaldo));
+    const k = S.contas.find(x => x.tipo === 'cartao' && x.pagaCom === c.id), fa = k && faturas(k).find(f => !f.pago);
+    if (fa) add(addDia(HOJE, -1), -fa.valor, 'PAGTO FATURA CARTAO ' + norm(k.banco));
+    add(addDia(HOJE, -6), 350, 'PIX RECEBIDO JOAO SILVA');
+    add(addDia(HOJE, -5), -27.9, 'UBER *TRIP');
+    add(addDia(HOJE, -4), -180, 'POSTO IPIRANGA');
+    add(addDia(HOJE, -3), -64.35, 'FARMACIA PAGUE MENOS');
+    add(addDia(HOJE, -2), -39.9, 'TARIFA PACOTE DE SERVICOS');
+  } else {
+    const fa = faturas(c).find(f => !f.pago), ds = [];
+    for (let i = 0; i < 60 && ds.length < 8; i++) { const d = addDia(HOJE, -i); if (!fa || faturaVenc(c, d) === fa.venc) ds.push(d); }
+    const dia = j => ds[j % Math.max(1, ds.length)] || HOJE;
+    (fa ? fa.itens : []).slice(0, 3).forEach((l, j) => add(l.compra || dia(j), -l.valor, l.descricao.toUpperCase()));
+    add(dia(3), -32.5, 'UBER *TRIP'); add(dia(4), -129.9, 'AMAZON MARKETPLACE'); add(dia(5), -199, 'MAGALU 02/06');
+    add(dia(6), -48.7, 'RESTAURANTE SABOR DO MAR'); add(dia(1), 1500, 'PAGAMENTO RECEBIDO');
+  }
+  const f = d => d.replace(/-/g, '') + '120000[-3:BRT]';
+  const saldo = card ? 0 : saldoConta(c).hoje + sum(L.filter(t => !t.jaRefletido), t => t.valor);
+  const rs = card ? 'CCSTMTRS' : 'STMTRS', ini = L.map(t => t.data).sort()[0] || HOJE;
+  return `OFXHEADER:100\nDATA:OFXSGML\nVERSION:102\nCHARSET:1252\n\n<OFX><SIGNONMSGSRSV1><SONRS><FI><ORG>${norm(c.banco)}</FI></SONRS></SIGNONMSGSRSV1><BANKMSGSRSV1><${rs}><CURDEF>BRL<BANKTRANLIST><DTSTART>${f(ini)}<DTEND>${f(HOJE)}\n`
+    + L.map(t => `<STMTTRN><TRNTYPE>${t.valor < 0 ? 'DEBIT' : 'CREDIT'}<DTPOSTED>${f(t.data)}<TRNAMT>${t.valor.toFixed(2)}<FITID>${t.fitid}<MEMO>${t.desc}</STMTTRN>`).join('\n')
+    + `\n</BANKTRANLIST>${card ? '' : `<LEDGERBAL><BALAMT>${saldo.toFixed(2)}<DTASOF>${f(HOJE)}</LEDGERBAL>`}</${rs}></BANKMSGSRSV1></OFX>`;
+}
+function drawImport() {
+  const c = contaById(imp.contaId), us = contasUsaveis().filter(x => x.ownerId === S.session);
+  const og = (rot, arr) => arr.length ? `<optgroup label="${rot}">${arr.map(x => `<option value="${x.id}" ${x.id === imp.contaId ? 'selected' : ''}>${esc(contaLabel(x))}</option>`).join('')}</optgroup>` : '';
+  let corpo = '';
+  if (imp.step === 'arquivo') corpo = `
+    <div class="fgrid">
+      <div class="field full"><label for="imp-conta">De qual conta ou cartão é o arquivo?</label><select id="imp-conta" class="input" data-chg="impconta">
+        <option value="">Escolha…</option>${og('Contas PF', us.filter(x => x.tipo === 'conta' && pessoaC(x) === 'pf'))}${og('Cartões PF', us.filter(x => x.tipo === 'cartao' && pessoaC(x) === 'pf'))}${og('Contas PJ', us.filter(x => x.tipo === 'conta' && pessoaC(x) === 'pj'))}${og('Cartões PJ', us.filter(x => x.tipo === 'cartao' && pessoaC(x) === 'pj'))}
+      </select></div>
+      <div class="field full"><label for="imp-file">Arquivo exportado pelo banco</label><input id="imp-file" class="input" type="file" accept=".ofx,.qfx,.csv,.txt" data-chg="impfile" ${c ? '' : 'disabled'}></div>
+    </div>
+    <div class="note stack" style="gap:4px">
+      <span><b>OFX</b> é o melhor formato: quase todo banco oferece na tela de extrato ou de fatura, em “Exportar” ou “Salvar como”.</span>
+      <span><b>CSV</b> (planilha) também funciona. Se o sistema não reconhecer as colunas, ele pergunta uma vez e guarda.</span>
+      <span>O arquivo é lido aqui no seu navegador. Nada é enviado para fora.</span>
+    </div>
+    ${imp.erro ? `<p class="err">${esc(imp.erro)}</p>` : ''}
+    <div class="row"><button class="btn ghost sm" data-act="impexemplo" ${c ? '' : 'disabled'}>Testar com um arquivo de exemplo</button><span class="faint small">gera um ${c && c.tipo === 'cartao' ? 'fatura' : 'extrato'} fictício desta ${c && c.tipo === 'cartao' ? 'conta de cartão' : 'conta'} para você ver como funciona</span></div>`;
+  if (imp.step === 'mapear') {
+    const h = imp.csv.rows[0], m = imp.csv.map, sel = (id, k, rot) => `<div class="field"><label for="${id}">${rot}</label><select id="${id}" class="input"><option value="-1">—</option>${h.map((x, i) => `<option value="${i}" ${m[k] === i ? 'selected' : ''}>${esc(x || 'Coluna ' + (i + 1))}</option>`).join('')}</select></div>`;
+    corpo = `<p class="small muted">Não reconheci as colunas desta planilha. Diga qual coluna é cada informação. O sistema guarda a resposta para os próximos arquivos desta conta.</p>
+      <div class="fgrid">${sel('imp-m-data', 'data', 'Data')}${sel('imp-m-desc', 'desc', 'Descrição')}${sel('imp-m-valor', 'valor', 'Valor')}
+        <label class="check-row" style="align-self:end"><input type="checkbox" id="imp-m-inv" ${m.inverter ? 'checked' : ''}> Os gastos aparecem como valores positivos</label></div>
+      <div class="tbl-wrap"><table class="tbl" style="min-width:0"><thead><tr>${h.map(x => `<th>${esc(x)}</th>`).join('')}</tr></thead><tbody>${imp.csv.rows.slice(1, 5).map(r => `<tr>${r.map(x => `<td class="small">${esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <div class="spread"><button class="btn ghost" data-act="impvoltar">Voltar</button><button class="btn primary" data-act="impmapok">Continuar</button></div>`;
+  }
+  if (imp.step === 'revisar') {
+    const rows = imp.rows, pj = pessoaC(c) === 'pj', n = st => rows.filter(r => r.status === st).length;
+    const inc = rows.filter(r => r.incluir && r.status === 'nova');
+    const txt = r => {
+      if (r.status === 'dup') return '<span class="pill neutral">Já importado antes</span>';
+      if (r.status === 'pgto') return '<span class="pill neutral">Pagamento da fatura · ignorado</span>';
+      if (r.status === 'fatura') return `<span class="pill good">Paga a ${esc(contaLabel(contaById(r.fatura.cardId)))} (vence ${dLabel(r.fatura.venc)})</span>`;
+      if (r.status === 'match') { const l = S.lanc.find(x => x.id === r.matchId); return `<span class="pill good">Já lançado: ${esc(l.descricao)}</span>${Math.abs(l.valor - r.valor) > .009 ? `<div class="meta">valor ajustado de ${BRL(l.valor)} para ${BRL(r.valor)}</div>` : ''}`; }
+      return `<span class="pill acc">Novo lançamento</span>${r.aprendida ? '<div class="meta">categoria aprendida</div>' : ''}`;
+    };
+    corpo = `
+      <div class="row small muted">${imp.formato} · ${esc(imp.nome)} · ${rows.length} transações de ${dLabel(imp.periodo[0])} a ${dLabel(imp.periodo[1])}</div>
+      ${imp.aviso ? `<p class="note" style="color:var(--warning)">${esc(imp.aviso)}</p>` : ''}
+      <div class="chips">
+        <span class="pill acc">${n('nova')} novas</span><span class="pill good">${n('match')} já lançadas</span>
+        ${n('fatura') ? `<span class="pill good">${n('fatura')} pagamento de fatura</span>` : ''}
+        ${n('dup') ? `<span class="pill neutral">${n('dup')} já importadas</span>` : ''}${n('pgto') ? `<span class="pill neutral">${n('pgto')} pagamentos ignorados</span>` : ''}
+      </div>
+      ${imp.saldo ? `<label class="check-row"><input type="checkbox" id="imp-saldo" data-chg="impsaldo" ${imp.aplicarSaldo ? 'checked' : ''}> Atualizar o saldo da conta para <b class="num">${BRL(imp.saldo.valor)}</b> (saldo do extrato em ${dLabel(imp.saldo.data)}; hoje o sistema calcula ${BRL(saldoConta(c).hoje)})</label>` : ''}
+      <div class="tbl-wrap"><table class="tbl imp-tbl">
+        <thead><tr><th style="width:44px">Incluir</th><th>Data</th><th>Descrição no banco</th><th class="r">Valor</th><th>Categoria</th><th>O que vai acontecer</th></tr></thead>
+        <tbody>${rows.map(r => { const trava = r.status === 'dup' || r.status === 'pgto'; return `<tr class="${r.incluir ? '' : 'off'}">
+          <td><button class="chk" data-act="improw" data-i="${r.i}" aria-pressed="${r.incluir}" ${trava ? 'disabled' : ''} aria-label="Incluir ${esc(r.desc)}">${CHECK_SVG}</button></td>
+          <td class="num">${dLabel(r.data)}</td>
+          <td><div class="desc small">${esc(r.desc)}</div>${r.parcela ? `<div class="meta">parcela ${r.parcela}</div>` : ''}</td>
+          <td class="r num" style="font-weight:600;color:${r.tipo === 'receita' ? 'var(--good)' : 'var(--ink)'}">${r.tipo === 'receita' ? '+' : '−'}${BRL(r.valor)}</td>
+          <td>${r.status === 'fatura' || trava ? '<span class="faint small">—</span>' : `<select class="input" data-chg="impcat" data-i="${r.i}" aria-label="Categoria de ${esc(r.desc)}">${catsPara(r.tipo, pj).map(x => `<option ${x === r.cat ? 'selected' : ''}>${x}</option>`).join('')}</select>`}</td>
+          <td>${txt(r)}</td></tr>`; }).join('')}</tbody></table></div>
+      <p class="faint small">Quando você troca uma categoria, o sistema aprende: descrições parecidas já virão com a categoria certa na próxima importação.</p>
+      <div class="spread">
+        <button class="btn ghost" data-act="impvoltar">Escolher outro arquivo</button>
+        <div class="row"><span class="small muted">${inc.length} novos (${BRL(sum(inc.filter(r => r.tipo === 'despesa'), r => r.valor))} em saídas)</span><button class="btn primary" data-act="impok">Importar</button></div>
+      </div>`;
+  }
+  modalRoot.innerHTML = `<div class="modal" data-act="fecharfundo"><div class="card wide" role="dialog" aria-modal="true" aria-labelledby="imp-t">
+    <div class="spread"><h2 id="imp-t">Importar ${c && c.tipo === 'cartao' ? 'fatura' : 'extrato'}${c ? ' · ' + esc(contaLabel(c)) : ''}</h2><button class="btn link" data-act="fechar">Fechar</button></div>
+    ${corpo}</div></div>`;
+}
 
 /* ---------- toast ---------- */
 let toastT;
@@ -1267,7 +1536,7 @@ document.addEventListener('click', ev => {
     case 'ltab': loginTab = v; loginErr = ''; render(); break;
     case 'demo': S.session = v; S.ui.tab = 'painel'; save(); render(); break;
     case 'logout': S.session = null; loginTab = 'entrar'; loginErr = ''; save(); render(); break;
-    case 'reset': { const sess = S.session; S = seed(); S.session = S.users.some(u => u.id === sess) ? sess : null; save(); render(); toast('Dados de exemplo restaurados'); break; }
+    case 'reset': { const sess = S.session; S = seed(); completarEstado(); S.session = S.users.some(u => u.id === sess) ? sess : null; save(); render(); toast('Dados de exemplo restaurados'); break; }
     case 'tab': S.ui.tab = v; save(); render(); window.scrollTo({ top: 0 }); break;
     case 'pago': {
       const l = S.lanc.find(x => x.id === id); if (!l) break;
@@ -1285,6 +1554,20 @@ document.addEventListener('click', ev => {
     case 'delconta': confirmConta = id || null; render(); break;
     case 'delcontaok': { const c = contaById(id); S.contas = S.contas.filter(x => x.id !== id); S.lanc.forEach(l => { if (l.contaId === id) l.contaId = null; }); S.contas.forEach(x => { if (x.pagaCom === id) x.pagaCom = null; }); if (S.ui.contaFiltro === id) S.ui.contaFiltro = ''; confirmConta = null; save(); render(); toast(`${contaLabel(c)} ${c.tipo === 'cartao' ? 'removido' : 'removida'}`); break; }
     case 'projper': S.ui.proj.periodo = v; save(); render(); break;
+    case 'importar': abrirImport(id); break;
+    case 'impexemplo': { const c = contaById(imp.contaId); if (c) processarArquivo(`exemplo-${norm(c.banco).toLowerCase().replace(/ /g, '-')}.ofx`, gerarOFXExemplo(c)); break; }
+    case 'impvoltar': imp.step = 'arquivo'; imp.erro = ''; drawImport(); break;
+    case 'improw': { const r = imp.rows[+a.dataset.i]; r.incluir = !r.incluir; drawImport(); break; }
+    case 'impmapok': {
+      const g = id => +document.getElementById(id).value;
+      const map = { data: g('imp-m-data'), desc: g('imp-m-desc'), valor: g('imp-m-valor'), id: -1, inverter: document.getElementById('imp-m-inv').checked, n: imp.csv.rows[0].length };
+      if (map.data < 0 || map.desc < 0 || map.valor < 0) { toast('Escolha as colunas de data, descrição e valor'); break; }
+      S.csvMap[imp.contaId] = map; save(); irRevisao({ formato: 'CSV', trans: csvTrans(imp.csv.rows, map), saldo: null }); break;
+    }
+    case 'impok': {
+      const r = confirmarImport(); save(); closeModal(); render();
+      toast(`Importado: ${r.novos} novos, ${r.casados} já lançados${r.faturas ? ', ' + r.faturas + ' fatura paga' : ''}${r.regras ? ' · ' + r.regras + ' categoria(s) aprendida(s)' : ''}`); break;
+    }
     case 'ctipo': contaTipo = v; contaErr = ''; render(); break;
     case 'ccor': contaCor = v; document.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); break;
     case 'mes': S.ui.month = v === '0' ? CUR : addM(S.ui.month || CUR, +v); save(); render(); break;
@@ -1324,6 +1607,14 @@ document.addEventListener('change', ev => {
   const t = ev.target, k = t.dataset.chg; if (!k) return;
   if (k === 'projde') { S.ui.proj.de = t.value; save(); render(); }
   if (k === 'projate') { S.ui.proj.ate = t.value; save(); render(); }
+  if (k === 'impconta') { imp.contaId = t.value; imp.erro = ''; drawImport(); }
+  if (k === 'impfile') {
+    const f = t.files && t.files[0]; if (!f) return;
+    if (f.size > 5 * 1024 * 1024) { imp.erro = 'Arquivo muito grande (máximo 5 MB).'; drawImport(); return; }
+    f.arrayBuffer().then(buf => processarArquivo(f.name, decodeArquivo(buf))).catch(() => { imp.erro = 'Não consegui ler o arquivo.'; drawImport(); });
+  }
+  if (k === 'impcat') { const r = imp.rows[+t.dataset.i]; r.cat = t.value; }
+  if (k === 'impsaldo') { imp.aplicarSaldo = t.checked; }
   if (k === 'contafiltro') { S.ui.contaFiltro = t.value; save(); render(); }
   if (k === 'mconta') { if (editState) { readModal(); drawModal(!!modalRoot.dataset.novo); } }
   if (k === 'scope') { S.ui.scope[S.session] = t.value; save(); render(); }
@@ -1451,7 +1742,7 @@ document.addEventListener('submit', ev => {
   }
 });
 
-document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && editState) closeModal(); });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && (editState || imp)) closeModal(); });
 
 render();
 })();
