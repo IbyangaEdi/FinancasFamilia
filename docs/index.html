@@ -315,7 +315,7 @@ const NUMS = new Set(['valor', 'saldo', 'limite', 'qtd', 'pm', 'taxa', 'aplicado
 const doBanco = row => Object.fromEntries(Object.entries(row).filter(([k]) => k !== 'criado_em').map(([k, v]) => [camel(k), NUMS.has(camel(k)) && v !== null ? Number(v) : v]));
 const COLS = {
   contas: ['id', 'ownerId', 'compartilhado', 'tipo', 'pessoa', 'banco', 'apelido', 'cor', 'saldo', 'dataSaldo', 'limite', 'fecha', 'venc', 'pagaCom', 'empresa', 'cnpj'],
-  lancamentos: ['id', 'ownerId', 'tipo', 'descricao', 'valor', 'venc', 'compra', 'contaId', 'categoria', 'essencial', 'pago', 'pagoEm', 'compartilhado', 'parcela', 'fitid', 'origem'],
+  lancamentos: ['id', 'ownerId', 'tipo', 'descricao', 'valor', 'venc', 'compra', 'contaId', 'categoria', 'essencial', 'pago', 'pagoEm', 'compartilhado', 'parcela', 'fitid', 'origem', 'serie'],
   investimentos: ['id', 'ownerId', 'compartilhado', 'tipo', 'classe', 'ticker', 'qtd', 'pm', 'data', 'titulo', 'ano', 'indexador', 'taxa', 'aplicado', 'produto', 'emissor', 'cnpj', 'nome'],
   importacoes: ['id', 'ownerId', 'contaId', 'arquivo', 'data', 'novos', 'casados', 'faturas', 'regras']
 };
@@ -838,6 +838,7 @@ VIEWS.contas = () => {
           <button data-act="pessoa" data-v="pf" aria-pressed="${pes === 'pf'}">Pessoal (PF)</button>
           <button data-act="pessoa" data-v="pj" aria-pressed="${pes === 'pj'}">Empresa (PJ)</button>
         </div>
+        <button class="btn ghost" data-act="futuros">Programar próximos meses</button>
         <button class="btn ghost" data-act="importar" data-id="">Importar arquivo</button>
         <button class="btn primary" data-act="novo">+ Novo lançamento</button>
       </div>
@@ -868,7 +869,9 @@ VIEWS.contas = () => {
           <td><span class="pill ${cls}">${txt}</span></td>
           <td class="r num" style="font-weight:600;${l.tipo === 'receita' ? 'color:var(--good)' : ''}">${l.tipo === 'receita' ? '+' : ''}${BRL(l.valor)}</td>
           <td class="r" style="white-space:nowrap">${!dono ? '' : confirmLanc === l.id
-            ? `<span class="small">Excluir?</span> <button class="btn danger sm" data-act="dellancok" data-id="${l.id}">Sim, excluir</button> <button class="btn ghost sm" data-act="dellanc" data-id="">Não</button>`
+            ? (l.serie && S.lanc.some(x => x.serie === l.serie && x.id !== l.id && x.venc > l.venc)
+              ? `<span class="small">Excluir?</span> <button class="btn danger sm" data-act="dellancok" data-id="${l.id}">Só este</button> <button class="btn danger sm" data-act="dellancok" data-id="${l.id}" data-v="serie">Este e os próximos</button> <button class="btn ghost sm" data-act="dellanc" data-id="">Não</button>`
+              : `<span class="small">Excluir?</span> <button class="btn danger sm" data-act="dellancok" data-id="${l.id}">Sim, excluir</button> <button class="btn ghost sm" data-act="dellanc" data-id="">Não</button>`)
             : `<button class="btn link sm" data-act="editar" data-id="${l.id}">Editar</button><button class="btn link sm" style="color:var(--critical)" data-act="dellanc" data-id="${l.id}" aria-label="Excluir ${esc(l.descricao)}">Excluir</button>`}</td>
         </tr>`; }).join('')}</tbody></table></div>`
       : `<div class="note">Nenhum lançamento neste filtro. Use “+ Novo lançamento” para adicionar despesas ou receitas deste mês.</div>`}
@@ -1316,7 +1319,7 @@ function readModal() {
   if (g('m-pago')) e.pago = g('m-pago').checked;
   if (g('m-rep')) { e.rep = g('m-rep').value; e.n = parseInt(g('m-n').value, 10); }
 }
-const closeModal = () => { modalRoot.innerHTML = ''; editState = null; imp = null; };
+const closeModal = () => { modalRoot.innerHTML = ''; editState = null; imp = null; futModal = null; };
 
 /* ---------- importação de extratos e faturas (OFX / CSV) ---------- */
 const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1448,8 +1451,13 @@ const dataBR = s => { s = String(s).trim(); let m;
   if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/))) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${pad(+m[2])}-${pad(+m[1])}`;
   return ''; };
 function autoMap(h) {
-  const f = re => h.findIndex(x => re.test(norm(x)));
-  return { data: f(/^(DATA|DATE|DT)\b/), desc: f(/DESCRI|HISTORICO|TITLE|ESTABELEC|LANCAMENTO|MEMO|DETALHE/), valor: f(/VALOR|AMOUNT|MONTANTE|QUANTIA/), id: f(/IDENTIFICADOR|^ID$/), inverter: false };
+  const N = h.map(norm), f = re => N.findIndex(x => re.test(x));
+  /* colunas de valor em reais; dólar, cotação e IOF ficam de fora */
+  const moeda = N.map((x, i) => ({ x, i })).filter(o => /VALOR|AMOUNT|MONTANTE|QUANTIA|\bBRL\b|REAIS|\bR\b/.test(o.x));
+  const reais = moeda.filter(o => !/\bUS\b|USD|DOLAR|DOLLAR|COTACAO|CAMBIO|\bTAXA\b|IOF|\bEUR\b|EURO/.test(o.x));
+  const brl = reais.find(o => /\bR\b|BRL|REAIS/.test(o.x)) || reais[0];
+  return { data: f(/^(DATA|DATE|DT)\b/), desc: f(/DESCRI|HISTORICO|TITLE|ESTABELEC|LANCAMENTO|MEMO|DETALHE/), valor: brl ? brl.i : -1,
+    id: f(/IDENTIFICADOR|^ID$/), inverter: false, ambiguo: moeda.length > 1 };
 }
 function csvTrans(rows, map) {
   const vistos = {};
@@ -1468,14 +1476,22 @@ function montarRevisao(conta, parsed) {
   return trans.map((t, i) => {
     const tipo = t.valor < 0 ? 'despesa' : 'receita', valor = Math.round(Math.abs(t.valor) * 100) / 100;
     const r = { i, data: t.data, desc: t.desc, valor, tipo, fitid: t.fitid, incluir: true, status: 'nova', parcela: null };
-    const mp = card && t.desc.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*$/);
-    if (mp && +mp[1] >= 1 && +mp[1] <= +mp[2] && +mp[2] > 1) r.parcela = `${+mp[1]}/${+mp[2]}`;
+    r.parc = lerParcela(t.desc, card); if (r.parc) r.parcela = `${r.parc.i}/${r.parc.n}`;
     if (fitids.has(t.fitid)) { r.status = 'dup'; r.incluir = false; }
     else if (card && tipo === 'receita') { r.status = 'pgto'; r.incluir = false; }
     else {
       if (!card && tipo === 'despesa') for (const k of cartoesPagos) {
         const f = faturas(k).find(f => !f.pago && !usados.has('f|' + k.id + f.venc) && Math.abs(f.valor - valor) <= Math.max(1, f.valor * .01));
         if (f) { usados.add('f|' + k.id + f.venc); Object.assign(r, { status: 'fatura', fatura: { cardId: k.id, venc: f.venc } }); break; }
+      }
+      if (r.status === 'nova') {
+        /* parcela ou mês de assinatura que já estava previsto */
+        const k = chaveRegra(t.desc);
+        const prev = S.lanc.filter(l => !usados.has(l.id) && !l.fitid && l.tipo === tipo && l.contaId === conta.id && chaveRegra(l.descricao) === k
+            && (r.parcela ? l.parcela === r.parcela && Math.abs(l.valor - valor) <= Math.max(.5, l.valor * .03)
+              : l.origem === 'previsto' && Math.abs(days(ref(l), t.data)) <= 15 && Math.abs(l.valor - valor) <= Math.max(1, l.valor * .3)))
+          .sort((a, b) => Math.abs(days(ref(a), t.data)) - Math.abs(days(ref(b), t.data)))[0];
+        if (prev) { usados.add(prev.id); Object.assign(r, { status: 'match', matchId: prev.id }); }
       }
       if (r.status === 'nova') {
         const c = S.lanc.filter(l => !usados.has(l.id) && !l.fitid && l.tipo === tipo && (l.contaId === conta.id || (!l.contaId && l.ownerId === S.session))
@@ -1487,9 +1503,84 @@ function montarRevisao(conta, parsed) {
     const m = r.matchId && S.lanc.find(l => l.id === r.matchId);
     const sug = m ? { cat: m.categoria } : r.status === 'fatura' ? { cat: '' } : sugerirCat(t.desc, tipo, pj);
     r.catSug = r.cat = sug.cat; r.aprendida = !!sug.aprendida;
+    r.futuro = !!(r.parc && r.parc.i < r.parc.n);
+    r.repetir = !r.parc && tipo === 'despesa' && ehAssinatura(r.cat);
     return r;
   });
 }
+/* ---------- assinaturas e parcelas: lançamentos dos próximos meses ---------- */
+const CATS_ASSINATURA = ['Assinaturas', 'Apps e jogos', 'Softwares e assinaturas'];
+const ehAssinatura = cat => CATS_ASSINATURA.includes(cat);
+const MESES_FUTUROS = 12;
+/* "PARC 02/06", "PARCELA 2 DE 6" em qualquer lugar; "LOJA 02/06" no fim só em cartão (em conta pode ser data) */
+function lerParcela(desc, card) {
+  const m = String(desc).match(/PARC(?:ELA)?\.?\s*(\d{1,2})\s*(?:\/|DE)\s*(\d{1,2})/i) || (card ? String(desc).match(/(?:^|\s)(\d{1,2})\s*\/\s*(\d{1,2})\s*$/) : null);
+  if (!m) return null;
+  const i = +m[1], n = +m[2];
+  return i >= 1 && n >= 2 && i <= n && n <= 72 ? { i, n, txt: m[0] } : null;
+}
+const descParcela = (desc, txt, k, n) => desc.replace(txt, txt.replace(/(\d{1,2})(\s*(?:\/|DE)\s*)(\d{1,2})/i, (_, a, sep) => pad(k) + sep + pad(n)));
+function mesSeguinte(base, k) {
+  const card = isCard(base) ? contaById(base.contaId) : null;
+  if (card) { const ref = base.compra || base.venc, d = dateIn(addM(ref.slice(0, 7), k), +ref.slice(8)); return { compra: d, venc: faturaVenc(card, d) }; }
+  return { compra: null, venc: dateIn(addM(base.venc.slice(0, 7), k), +base.venc.slice(8)) };
+}
+const novoFuturo = (base, extra) => ({ id: uid(), ownerId: base.ownerId || S.session, tipo: base.tipo, descricao: base.descricao, valor: base.valor, contaId: base.contaId,
+  categoria: base.categoria, essencial: base.essencial, compartilhado: base.compartilhado, pago: false, pagoEm: null, fitid: null, origem: 'previsto', parcela: null, ...extra });
+/* cria, sem duplicar, as parcelas que faltam ou os próximos 12 meses de uma assinatura */
+function gerarFuturos(base, modo) {
+  const criados = [], serie = base.serie || (base.serie = uid()), chaveB = chaveRegra(base.descricao);
+  const mesmo = (l, venc) => l.id !== base.id && l.tipo === base.tipo && l.contaId === base.contaId && l.venc.slice(0, 7) === venc.slice(0, 7)
+    && (l.serie === serie || chaveRegra(l.descricao) === chaveB);
+  if (modo === 'parcela') {
+    const p = lerParcela(base.descricao, true) || (base.parcela ? { i: +base.parcela.split('/')[0], n: +base.parcela.split('/')[1], txt: '' } : null);
+    if (!p) return criados;
+    for (let k = p.i + 1; k <= p.n; k++) {
+      const pos = mesSeguinte(base, k - p.i), parc = `${k}/${p.n}`;
+      if (S.lanc.some(l => mesmo(l, pos.venc) && (l.serie === serie || (l.parcela === parc && Math.abs(l.valor - base.valor) <= Math.max(.5, base.valor * .03))))) continue;
+      const f = novoFuturo(base, { ...pos, serie, parcela: parc, descricao: p.txt ? descParcela(base.descricao, p.txt, k, p.n) : base.descricao });
+      S.lanc.push(f); criados.push(f);
+    }
+  } else {
+    for (let k = 1; k <= MESES_FUTUROS; k++) {
+      const pos = mesSeguinte(base, k);
+      if (S.lanc.some(l => mesmo(l, pos.venc))) continue;
+      const f = novoFuturo(base, { ...pos, serie }); S.lanc.push(f); criados.push(f);
+    }
+  }
+  return criados;
+}
+/* para o botão "Programar próximos meses": última parcela de cada compra e assinaturas cobradas nos últimos 45 dias */
+function candidatosFuturos() {
+  const meus = S.lanc.filter(l => l.ownerId === S.session && l.tipo === 'despesa'), vistos = new Set(), lista = [];
+  const parc = l => l.parcela ? l.parcela.split('/').map(Number) : (x => x ? [x.i, x.n] : null)(lerParcela(l.descricao, isCard(l)));
+  for (const l of meus.filter(l => parc(l)).sort((a, b) => b.venc.localeCompare(a.venc))) {
+    const p = parc(l), k = `p|${l.contaId}|${chaveRegra(l.descricao)}|${p[1]}|${l.valor.toFixed(2)}`;
+    if (vistos.has(k)) continue; vistos.add(k);
+    if (p[0] < p[1]) lista.push({ l, modo: 'parcela', txt: `faltam ${p[1] - p[0]} parcela${p[1] - p[0] > 1 ? 's' : ''} (${p[0]}/${p[1]} lançada)` });
+  }
+  for (const l of meus.filter(l => ehAssinatura(l.categoria) && !parc(l) && l.venc >= addDia(HOJE, -45)).sort((a, b) => b.venc.localeCompare(a.venc))) {
+    const k = `a|${l.contaId}|${chaveRegra(l.descricao)}`;
+    if (vistos.has(k)) continue; vistos.add(k);
+    if (S.lanc.filter(x => x.contaId === l.contaId && chaveRegra(x.descricao) === chaveRegra(l.descricao) && x.venc > HOJE).length >= MESES_FUTUROS - 1) continue;
+    lista.push({ l, modo: 'assinatura', txt: `repetir todo mês por ${MESES_FUTUROS} meses` });
+  }
+  return lista;
+}
+let futModal = null;
+function drawFuturos() {
+  const L = futModal;
+  modalRoot.innerHTML = `<div class="modal" data-act="fecharfundo"><div class="card" role="dialog" aria-modal="true" aria-labelledby="fut-t">
+    <div class="spread"><h2 id="fut-t">Programar próximos meses</h2><button class="btn link" data-act="fechar">Fechar</button></div>
+    ${L.length ? `<p class="small muted">Encontrei estas compras parceladas e assinaturas. Desmarque o que não deve ir para os próximos meses.</p>
+      <div class="list">${L.map((x, i) => `<label class="li check-row" style="cursor:pointer"><input type="checkbox" data-chg="futsel" data-i="${i}" ${x.on !== false ? 'checked' : ''}>
+        <span class="grow"><span class="desc small">${esc(x.l.descricao)}</span><span class="meta" style="display:block">${esc(contaLabel(contaById(x.l.contaId)))} · ${x.txt}</span></span>
+        <span class="num small">${BRL(x.l.valor)}</span></label>`).join('')}</div>
+      <div class="spread"><span class="faint small">Os lançamentos futuros entram como previstos e são casados com a fatura ou o extrato quando você importar o mês.</span><button class="btn primary" data-act="futok">Programar</button></div>`
+    : '<p class="muted">Não encontrei compras parceladas nem assinaturas recentes sem os próximos meses lançados.</p>'}
+  </div></div>`;
+}
+
 let imp = null;
 function abrirImport(contaId) { imp = { contaId: contaId || (contasUsaveis().find(c => c.ownerId === S.session) || {}).id || '', step: 'arquivo', erro: '' }; drawImport(); }
 function irRevisao(parsed) {
@@ -1508,14 +1599,16 @@ function processarArquivo(nome, txt) {
   if (/<OFX>|OFXHEADER/i.test(txt)) { irRevisao(parseOFX(txt)); return; }
   const rows = splitCSV(txt);
   if (rows.length < 2 || rows[0].length < 2) { imp.erro = 'Formato não reconhecido. Use o arquivo OFX ou CSV exportado pelo banco.'; drawImport(); return; }
-  const map = S.csvMap[imp.contaId] && S.csvMap[imp.contaId].n === rows[0].length ? S.csvMap[imp.contaId] : autoMap(rows[0]);
+  const salvo = S.csvMap[imp.contaId] && S.csvMap[imp.contaId].n === rows[0].length ? S.csvMap[imp.contaId] : null;
+  const map = salvo || autoMap(rows[0]);
   imp.csv = { rows, map };
-  if (map.data < 0 || map.valor < 0 || map.desc < 0) { imp.step = 'mapear'; drawImport(); return; }
+  /* sem mapa salvo: pergunta sempre que faltar coluna ou houver mais de uma coluna de valor (ex.: dólar, cotação e reais) */
+  if (map.data < 0 || map.valor < 0 || map.desc < 0 || (!salvo && map.ambiguo)) { imp.step = 'mapear'; drawImport(); return; }
   irRevisao({ formato: 'CSV', trans: csvTrans(rows, map), saldo: null });
 }
 function confirmarImport() {
   const c = contaById(imp.contaId), card = c.tipo === 'cartao', pj = pessoaC(c) === 'pj';
-  const res = { novos: 0, casados: 0, faturas: 0, regras: 0 };
+  const res = { novos: 0, casados: 0, faturas: 0, regras: 0 }, bases = [];
   for (const r of imp.rows) {
     if (!r.incluir || r.status === 'dup' || r.status === 'pgto') continue;
     if (r.cat && r.cat !== r.catSug) { S.regras[regraId(pj, r.tipo, r.desc)] = r.cat; res.regras++; }
@@ -1526,19 +1619,26 @@ function confirmarImport() {
     }
     if (r.status === 'match') {
       const l = S.lanc.find(x => x.id === r.matchId);
-      Object.assign(l, { fitid: r.fitid, valor: r.valor, categoria: r.cat, contaId: c.id });
+      Object.assign(l, { fitid: r.fitid, valor: r.valor, categoria: r.cat, contaId: c.id, origem: l.origem === 'previsto' ? 'importado' : l.origem });
+      if (r.parcela) l.parcela = r.parcela;
       if (r.tipo === 'despesa' && CATS[r.cat]) l.essencial = CATS[r.cat].e;
       if (!card) { l.pago = true; l.pagoEm = r.data; }
-      res.casados++; continue;
+      bases.push([l, r]); res.casados++; continue;
     }
     const venc = card ? faturaVenc(c, r.data) : r.data, faturaPassada = card && venc < HOJE;
-    S.lanc.push({ id: uid(), ownerId: S.session, tipo: r.tipo, descricao: r.desc.slice(0, 80), valor: r.valor, venc, compra: card ? r.data : null, contaId: c.id,
+    const novo = { id: uid(), ownerId: S.session, tipo: r.tipo, descricao: r.desc.slice(0, 80), valor: r.valor, venc, compra: card ? r.data : null, contaId: c.id,
       categoria: r.cat, essencial: r.tipo === 'despesa' ? !!(CATS[r.cat] && CATS[r.cat].e) : true, pago: card ? faturaPassada : true,
-      pagoEm: card ? (faturaPassada ? venc : null) : r.data, compartilhado: c.compartilhado, parcela: r.parcela, fitid: r.fitid, origem: 'importado' });
+      pagoEm: card ? (faturaPassada ? venc : null) : r.data, compartilhado: c.compartilhado, parcela: r.parcela, fitid: r.fitid, origem: 'importado', serie: null };
+    S.lanc.push(novo); bases.push([novo, r]);
     res.novos++;
   }
+  res.futuros = 0;
+  for (const [l, r] of bases) {
+    if (r.futuro && r.parc) res.futuros += gerarFuturos(l, 'parcela').length;
+    else if (r.repetir) res.futuros += gerarFuturos(l, 'assinatura').length;
+  }
   if (imp.saldo && imp.aplicarSaldo) { c.saldo = imp.saldo.valor; c.dataSaldo = addDia(imp.saldo.data, 1); }
-  S.importacoes.push({ id: uid(), contaId: c.id, arquivo: imp.nome, data: HOJE, ...res });
+  S.importacoes.push({ id: uid(), contaId: c.id, arquivo: imp.nome, data: HOJE, novos: res.novos, casados: res.casados, faturas: res.faturas, regras: res.regras });
   return res;
 }
 /* extrato fictício, para testar sem baixar nada do banco */
@@ -1591,8 +1691,8 @@ function drawImport() {
     ${imp.erro ? `<p class="err">${esc(imp.erro)}</p>` : ''}`;
   if (imp.step === 'mapear') {
     const h = imp.csv.rows[0], m = imp.csv.map, sel = (id, k, rot) => `<div class="field"><label for="${id}">${rot}</label><select id="${id}" class="input"><option value="-1">—</option>${h.map((x, i) => `<option value="${i}" ${m[k] === i ? 'selected' : ''}>${esc(x || 'Coluna ' + (i + 1))}</option>`).join('')}</select></div>`;
-    corpo = `<p class="small muted">Não reconheci as colunas desta planilha. Diga qual coluna é cada informação. O sistema guarda a resposta para os próximos arquivos desta conta.</p>
-      <div class="fgrid">${sel('imp-m-data', 'data', 'Data')}${sel('imp-m-desc', 'desc', 'Descrição')}${sel('imp-m-valor', 'valor', 'Valor')}
+    corpo = `<p class="small muted">${m.ambiguo && m.data >= 0 && m.desc >= 0 ? 'Esta planilha tem mais de uma coluna de valor. Confira qual é o <b>valor em reais</b> que deve ser lançado.' : 'Não reconheci todas as colunas desta planilha. Diga qual coluna é cada informação.'} O sistema guarda a resposta para os próximos arquivos desta conta.</p>
+      <div class="fgrid">${sel('imp-m-data', 'data', 'Data')}${sel('imp-m-desc', 'desc', 'Descrição')}${sel('imp-m-valor', 'valor', 'Valor (em reais)')}
         <label class="check-row" style="align-self:end"><input type="checkbox" id="imp-m-inv" ${m.inverter ? 'checked' : ''}> Os gastos aparecem como valores positivos</label></div>
       <div class="tbl-wrap"><table class="tbl" style="min-width:0"><thead><tr>${h.map(x => `<th>${esc(x)}</th>`).join('')}</tr></thead><tbody>${imp.csv.rows.slice(1, 5).map(r => `<tr>${r.map(x => `<td class="small">${esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
       <div class="spread"><button class="btn ghost" data-act="impvoltar">Voltar</button><button class="btn primary" data-act="impmapok">Continuar</button></div>`;
@@ -1607,6 +1707,13 @@ function drawImport() {
       if (r.status === 'match') { const l = S.lanc.find(x => x.id === r.matchId); return `<span class="pill good">Já lançado: ${esc(l.descricao)}</span>${Math.abs(l.valor - r.valor) > .009 ? `<div class="meta">valor ajustado de ${BRL(l.valor)} para ${BRL(r.valor)}</div>` : ''}`; }
       return `<span class="pill acc">Novo lançamento</span>${r.aprendida ? '<div class="meta">categoria aprendida</div>' : ''}`;
     };
+    const fut = r => {
+      if (!['nova', 'match'].includes(r.status) || !r.incluir) return '';
+      if (r.parc && r.parc.i < r.parc.n) return `<label class="check-row small" style="margin-top:6px"><input type="checkbox" data-chg="impfut" data-i="${r.i}" ${r.futuro ? 'checked' : ''}> Lançar parcelas ${r.parc.i + 1} a ${r.parc.n} nos próximos meses</label>`;
+      if (r.tipo === 'despesa' && !r.parc) return `<label class="check-row small" style="margin-top:6px"><input type="checkbox" data-chg="imprep" data-i="${r.i}" ${r.repetir ? 'checked' : ''}> Assinatura: repetir todo mês</label>`;
+      return '';
+    };
+    const nParc = rows.filter(r => r.incluir && r.futuro && r.parc).length, nAss = rows.filter(r => r.incluir && r.repetir && ['nova', 'match'].includes(r.status)).length;
     corpo = `
       <div class="row small muted">${imp.formato} · ${esc(imp.nome)} · ${rows.length} transações de ${dLabel(imp.periodo[0])} a ${dLabel(imp.periodo[1])}</div>
       ${imp.aviso ? `<p class="note" style="color:var(--warning)">${esc(imp.aviso)}</p>` : ''}
@@ -1624,10 +1731,10 @@ function drawImport() {
           <td><div class="desc small">${esc(r.desc)}</div>${r.parcela ? `<div class="meta">parcela ${r.parcela}</div>` : ''}</td>
           <td class="r num" style="font-weight:600;color:${r.tipo === 'receita' ? 'var(--good)' : 'var(--ink)'}">${r.status === 'nova' ? `<button class="btn link sm" style="color:inherit;font-weight:600;padding:2px 4px" data-act="impinv" data-i="${r.i}" title="Clique para inverter entrada/saída">${r.tipo === 'receita' ? '+' : '−'}${BRL(r.valor)}</button>` : `${r.tipo === 'receita' ? '+' : '−'}${BRL(r.valor)}`}</td>
           <td>${r.status === 'fatura' || trava ? '<span class="faint small">—</span>' : `<select class="input" data-chg="impcat" data-i="${r.i}" aria-label="Categoria de ${esc(r.desc)}">${catsPara(r.tipo, pj).map(x => `<option ${x === r.cat ? 'selected' : ''}>${x}</option>`).join('')}</select>`}</td>
-          <td>${txt(r)}</td></tr>`; }).join('')}</tbody></table></div>
-      <p class="faint small">Quando você troca uma categoria, o sistema aprende: descrições parecidas já virão com a categoria certa na próxima importação.</p>
+          <td>${txt(r)}${fut(r)}</td></tr>`; }).join('')}</tbody></table></div>
+      <p class="faint small">Quando você troca uma categoria, o sistema aprende: descrições parecidas já virão com a categoria certa na próxima importação.${nParc || nAss ? ` Ao importar, também vou programar os próximos meses de ${[nParc ? nParc + (nParc > 1 ? ' compras parceladas' : ' compra parcelada') : '', nAss ? nAss + (nAss > 1 ? ' assinaturas' : ' assinatura') : ''].filter(Boolean).join(' e ')}.` : ''}</p>
       <div class="spread">
-        <button class="btn ghost" data-act="impvoltar">Escolher outro arquivo</button>
+        <div class="row"><button class="btn ghost" data-act="impvoltar">Escolher outro arquivo</button>${imp.formato === 'CSV' ? '<button class="btn ghost" data-act="impcolunas">Ajustar colunas</button>' : ''}</div>
         <div class="row"><span class="small muted">${inc.length} novos (${BRL(sum(inc.filter(r => r.tipo === 'despesa'), r => r.valor))} em saídas)</span><button class="btn primary" data-act="impok">Importar</button></div>
       </div>`;
   }
@@ -1677,6 +1784,12 @@ document.addEventListener('click', ev => {
       const sug = sugerirCat(r.desc, r.tipo, pessoaC(c) === 'pj'); r.cat = r.catSug = sug.cat; r.aprendida = !!sug.aprendida;
       drawImport(); break;
     }
+    case 'impcolunas': imp.step = 'mapear'; drawImport(); break;
+    case 'futuros': futModal = candidatosFuturos(); drawFuturos(); break;
+    case 'futok': {
+      let n = 0; for (const x of futModal) if (x.on !== false) n += gerarFuturos(x.l, x.modo).length;
+      futModal = null; closeModal(); save(); render(); toast(n ? `${n} lançamentos futuros programados` : 'Nada novo para programar: os próximos meses já estavam lançados'); break;
+    }
     case 'improw': { const r = imp.rows[+a.dataset.i]; r.incluir = !r.incluir; drawImport(); break; }
     case 'impmapok': {
       const g = id => +document.getElementById(id).value;
@@ -1686,7 +1799,7 @@ document.addEventListener('click', ev => {
     }
     case 'impok': {
       const r = confirmarImport(); save(); closeModal(); render();
-      toast(`Importado: ${r.novos} novos, ${r.casados} já lançados${r.faturas ? ', ' + r.faturas + ' fatura paga' : ''}${r.regras ? ' · ' + r.regras + ' categoria(s) aprendida(s)' : ''}`); break;
+      toast(`Importado: ${r.novos} novos, ${r.casados} já lançados${r.faturas ? ', ' + r.faturas + ' fatura paga' : ''}${r.futuros ? ' · ' + r.futuros + ' lançamentos futuros programados' : ''}${r.regras ? ' · ' + r.regras + ' categoria(s) aprendida(s)' : ''}`); break;
     }
     case 'ctipo': contaTipo = v; contaErr = ''; render(); break;
     case 'ccor': contaCor = v; document.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); break;
@@ -1695,7 +1808,13 @@ document.addEventListener('click', ev => {
     case 'novo': openModal(null); break;
     case 'editar': confirmLanc = null; openModal(S.lanc.find(x => x.id === id)); break;
     case 'dellanc': confirmLanc = id || null; render(); break;
-    case 'dellancok': { const l = S.lanc.find(x => x.id === id); S.lanc = S.lanc.filter(x => x.id !== id); confirmLanc = null; save(); render(); if (l) toast(`“${l.descricao}” excluído`); break; }
+    case 'dellancok': {
+      const l = S.lanc.find(x => x.id === id); if (!l) break;
+      const antes = S.lanc.length;
+      S.lanc = v === 'serie' ? S.lanc.filter(x => !(x.id === id || (x.serie === l.serie && x.venc >= l.venc && x.ownerId === S.session))) : S.lanc.filter(x => x.id !== id);
+      const n = antes - S.lanc.length; confirmLanc = null; save(); render();
+      toast(n > 1 ? `“${l.descricao}” e os próximos excluídos (${n} lançamentos)` : `“${l.descricao}” excluído`); break;
+    }
     case 'fechar': case 'fecharfundo': closeModal(); break;
     case 'mtipo': readModal(); editState.tipo = v; if (v === 'receita' && isCard(editState)) { editState.contaId = null; editState.compra = null; } editState.categoria = v === 'despesa' ? 'Moradia' : 'Salário'; editState.essencial = true; drawModal(!!modalRoot.dataset.novo); break;
     case 'del': readModal(); editState.confirmDel = true; drawModal(false); break;
@@ -1740,7 +1859,10 @@ document.addEventListener('change', ev => {
       .catch(e => { console.error(e); imp.erro = 'Não consegui ler o arquivo' + (pdf ? ' PDF' : '') + '.'; })
       .finally(() => { if (imp) { imp.lendo = false; drawImport(); } });
   }
-  if (k === 'impcat') { const r = imp.rows[+t.dataset.i]; r.cat = t.value; }
+  if (k === 'impcat') { const r = imp.rows[+t.dataset.i]; r.cat = t.value; const rep = !r.parc && r.tipo === 'despesa' && ehAssinatura(r.cat); if (!r.repManual && rep !== r.repetir) { r.repetir = rep; drawImport(); } }
+  if (k === 'imprep') { const r = imp.rows[+t.dataset.i]; r.repetir = t.checked; r.repManual = true; drawImport(); }
+  if (k === 'impfut') { const r = imp.rows[+t.dataset.i]; r.futuro = t.checked; drawImport(); }
+  if (k === 'futsel') { futModal[+t.dataset.i].on = t.checked; }
   if (k === 'impsaldo') { imp.aplicarSaldo = t.checked; }
   if (k === 'contafiltro') { S.ui.contaFiltro = t.value; save(); render(); }
   if (k === 'mconta') { if (editState) { readModal(); drawModal(!!modalRoot.dataset.novo); } }
@@ -1790,9 +1912,10 @@ document.addEventListener('submit', ev => {
     const n = e.rep === 'mensal' ? 12 : e.rep === 'parc' ? Math.max(2, Math.min(120, e.n || 2)) : 1;
     if (e.rep === 'parc' && !(e.n >= 2)) { e.err = 'Informe o número de parcelas (2 ou mais).'; drawModal(true); return; }
     const d0 = card ? e.compra : e.venc, k0 = d0.slice(0, 7), dia = +d0.slice(8);
+    const serie = n > 1 ? uid() : null;
     for (let i = 0; i < n; i++) {
       const d = dateIn(addM(k0, i), dia), pago = !card && i === 0 && e.pago;
-      S.lanc.push({ id: uid(), ownerId: S.session, ...base, venc: card ? faturaVenc(card, d) : d, compra: card ? d : null, pago, pagoEm: pago ? HOJE : null, parcela: e.rep === 'parc' ? `${i + 1}/${n}` : null });
+      S.lanc.push({ id: uid(), ownerId: S.session, ...base, venc: card ? faturaVenc(card, d) : d, compra: card ? d : null, pago, pagoEm: pago ? HOJE : null, parcela: e.rep === 'parc' ? `${i + 1}/${n}` : null, serie, origem: i === 0 ? 'manual' : 'previsto' });
     }
     save(); closeModal(); S.ui.month = (card ? faturaVenc(card, d0) : d0).slice(0, 7); render(); toast(n > 1 ? `${n} lançamentos criados` : 'Lançamento adicionado'); return;
   }
@@ -1875,7 +1998,7 @@ document.addEventListener('submit', ev => {
   }
 });
 
-document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && (editState || imp)) closeModal(); });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && (editState || imp || futModal)) closeModal(); });
 
 sb.auth.onAuthStateChange((evento, sessao) => {
   if (evento === 'PASSWORD_RECOVERY') { modoSenhaNova = true; iniciando = false; render(); return; }
