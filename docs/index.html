@@ -75,6 +75,7 @@ button,input,select{font:inherit;color:inherit}
 .nav{display:flex;gap:6px;flex-wrap:wrap}
 .nav button{border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:8px 14px;cursor:pointer;color:var(--ink-2);font-weight:500}
 .nav button[aria-current="page"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.aviso-versao{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:70;display:flex;gap:12px;align-items:center;background:var(--header-bg);color:var(--header-ink);padding:10px 12px 10px 18px;border-radius:999px;box-shadow:var(--shadow);max-width:calc(100% - 32px);font-weight:600}
 .sync[data-st="erro"]{color:var(--critical);font-weight:600}.sync[data-st="salvando"]{color:var(--gold)}
 .demo-strip{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--gold-soft);color:var(--ink);border-radius:10px;padding:8px 14px;font-size:12.5px}
 
@@ -288,6 +289,27 @@ function faturaVenc(card, compra) {
   let k = compra.slice(0, 7); if (+compra.slice(8) > card.fecha) k = addM(k, 1);
   return dateIn(card.venc > card.fecha ? k : addM(k, 1), card.venc);
 }
+
+/* ---------- versão publicada (atualizada por scripts/nova_versao.py a cada publicação) ---------- */
+const VERSAO = '2026-10-12.192722';
+let versaoNova = null;
+async function checarVersao() {
+  try {
+    const r = await fetch('versao.json?_=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
+    const v = (await r.json()).versao;
+    if (v && VERSAO !== 'dev' && v !== VERSAO && v !== versaoNova) { versaoNova = v; mostrarAvisoVersao(); }
+  } catch (e) { /* sem conexão: tenta de novo depois */ }
+}
+function mostrarAvisoVersao() {
+  if (document.getElementById('aviso-versao')) return;
+  const el = document.createElement('div');
+  el.id = 'aviso-versao'; el.className = 'aviso-versao'; el.setAttribute('role', 'status');
+  el.innerHTML = '<span>Há uma versão nova do sistema.</span><button class="btn primary sm" data-act="atualizarversao">Atualizar agora</button>';
+  document.body.appendChild(el);
+}
+setInterval(checarVersao, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checarVersao(); });
+setTimeout(checarVersao, 3000);
 
 /* ---------- conexão com o Supabase ---------- */
 const SUPA_URL = 'https://kcufdtumwbamappouytf.supabase.co';
@@ -1806,6 +1828,7 @@ document.addEventListener('click', ev => {
   const act = a.dataset.act, v = a.dataset.v, id = a.dataset.id;
   if (act === 'fecharfundo' && ev.target !== a) return;
   switch (act) {
+    case 'atualizarversao': fila.then(() => { location.replace(location.pathname + '?v=' + encodeURIComponent(versaoNova || Date.now())); }); break;
     case 'ltab': loginTab = v; loginErr = ''; loginMsg = ''; render(); break;
     case 'logout': fila.then(() => sb.auth.signOut()); break;
     case 'tab': S.ui.tab = v; save(); render(); window.scrollTo({ top: 0 }); break;
