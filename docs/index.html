@@ -92,17 +92,21 @@ button,input,select{font:inherit;color:inherit}
 /* formulário */
 .field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .field label,.lbl-s{font-size:12.5px;font-weight:600;color:var(--ink-2)}
-.input{width:100%;border:1px solid var(--border);background:var(--surface);border-radius:10px;padding:10px 12px;min-width:0}
+.input{width:100%;height:42px;border:1px solid var(--border);background-color:var(--surface);border-radius:10px;padding:0 12px;min-width:0;line-height:1.2;font-size:14px}
+select.input{-webkit-appearance:none;appearance:none;padding-right:34px;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238592A3' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 8px;text-overflow:ellipsis}
 .input:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-soft)}
 .money{position:relative}
 .money span{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--ink-3);font-size:13px;pointer-events:none}
 .money .input{padding-left:36px;font-variant-numeric:tabular-nums}
-.big-money .input{font-size:26px;font-weight:700;padding:14px 14px 14px 52px}
+.big-money .input{font-size:26px;font-weight:700;height:60px;padding:0 14px 0 52px}
 .big-money span{font-size:18px;left:16px}
 .linha{display:grid;grid-template-columns:minmax(120px,1fr) minmax(140px,1.2fr) minmax(120px,1fr) auto;gap:10px;align-items:end;padding:12px;border-radius:12px;background:var(--surface-2)}
+.linha .field label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.linha.banco{grid-template-columns:minmax(150px,1.2fr) minmax(140px,1fr) auto}
+.linha.banco.outro{grid-template-columns:minmax(150px,1fr) minmax(140px,1fr) minmax(140px,1fr) auto}
 .linha.l5{grid-template-columns:minmax(120px,1fr) minmax(140px,1.2fr) minmax(120px,1fr) minmax(100px,.8fr) auto}
-@media (max-width:640px){.linha,.linha.l5{grid-template-columns:1fr 1fr}.linha .del{grid-column:2;justify-self:end}}
-.del{border:0;background:transparent;color:var(--ink-3);cursor:pointer;width:36px;height:40px;border-radius:10px;font-size:18px}
+@media (max-width:640px){.linha,.linha.l5,.linha.banco,.linha.banco.outro{grid-template-columns:1fr 1fr}.linha .del{grid-column:2;justify-self:end}}
+.del{border:0;background:transparent;color:var(--ink-3);cursor:pointer;width:38px;height:42px;border-radius:10px;font-size:18px;flex:none}
 .del:hover{background:var(--critical-soft);color:var(--critical)}
 .check-row{display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer}
 .check-row input{width:17px;height:17px;accent-color:var(--good)}
@@ -188,6 +192,10 @@ const TIPOS_DESP = ['Aluguel / financiamento da casa', 'Condomínio', 'Energia',
 const TIPOS_EMP = ['Financiamento de imóvel', 'Financiamento de veículo', 'Consórcio', 'Empréstimo pessoal', 'Empréstimo consignado', 'Outros'];
 const FREQ = { mensal: 'Todo mês', quinzenal: 'A cada 15 dias', semanal: 'Toda semana', bimestral: 'A cada 2 meses', trimestral: 'A cada 3 meses', semestral: 'A cada 6 meses', anual: 'Uma vez por ano', unica: 'Só uma vez' };
 const PRECISA_MES = ['bimestral', 'trimestral', 'semestral', 'anual', 'unica'];
+/* os mais usados por pessoas físicas no Brasil; "Outro" abre um campo para digitar o nome */
+const BANCOS = ['Nubank', 'Itaú', 'Bradesco', 'Banco do Brasil', 'Caixa', 'Santander', 'Inter', 'C6 Bank', 'BTG Pactual', 'Mercado Pago'];
+const saldoTotal = () => sum(S.contas || [], c => c.saldo || 0);
+const nomeBanco = c => c.banco === 'Outro' ? (c.outro || 'Outro banco') : c.banco;
 const ASSIN_SUG = ['Netflix', 'Spotify', 'Disney+', 'Max', 'Amazon Prime', 'Globoplay', 'YouTube Premium', 'iCloud', 'Google One', 'ChatGPT', 'Claude', 'Academia'];
 /* quanto um item rende ou custa num mês k (0 = mês atual) */
 function noMes(it, k) {
@@ -206,7 +214,7 @@ function noMes(it, k) {
 const mensal = it => ({ quinzenal: 2, semanal: 52 / 12, bimestral: 1 / 2, trimestral: 1 / 3, semestral: 1 / 6, anual: 1 / 12, unica: 0 }[it.freq] ?? 1) * (it.valor || 0);
 
 /* ---------- versão publicada (scripts/nova_versao.py atualiza a cada publicação) ---------- */
-const VERSAO = '2026-10-12.195103';
+const VERSAO = '2026-10-12.195706';
 let versaoNova = null;
 async function checarVersao() {
   try {
@@ -227,7 +235,7 @@ setTimeout(checarVersao, 3000);
 
 /* ---------- conexão com o Supabase: cada pessoa tem um registro em "planos" ---------- */
 const sb = supabase.createClient('https://kcufdtumwbamappouytf.supabase.co', 'sb_publishable_RjMI-qPCth4uAWAKhicHGQ_VWkF-lie');
-const vazio = () => ({ etapa: 'w1', nome: '', saldo: 0, receitas: [], fixas: [], cartoes: [], assinaturas: [], emprestimos: [], tiposRec: [...TIPOS_REC], tiposDesp: [...TIPOS_DESP], periodo: 24, feitos: {} });
+const vazio = () => ({ etapa: 'w1', nome: '', saldo: 0, contas: [], receitas: [], fixas: [], cartoes: [], assinaturas: [], emprestimos: [], tiposRec: [...TIPOS_REC], tiposDesp: [...TIPOS_DESP], periodo: 24, feitos: {} });
 let S = null, usuario = null, iniciando = true, modoSenhaNova = false, loginTab = 'entrar', loginMsg = '', erroCarga = '';
 let timerSave = null, fila = Promise.resolve();
 const traduz = m => /Failed to fetch|NetworkError/i.test(m) ? 'sem conexão com a internet' : /row-level security|permission/i.test(m) ? 'sem permissão' : m;
@@ -252,6 +260,8 @@ async function carregar(u) {
   if (error) throw error;
   S = { ...vazio(), ...(data ? data.dados : {}) };
   if (!data) S.nome = (u.user_metadata && u.user_metadata.nome) || u.email.split('@')[0];
+  /* quem preencheu antes dos bancos: o saldo único vira um banco "Outro" para não perder o valor */
+  if (!S.contas.length && S.saldo) { S.contas = [{ id: uid(), banco: 'Outro', outro: 'Saldo informado', saldo: S.saldo }]; S.saldo = 0; }
   if (!/^w[1-5]$|^painel$/.test(S.etapa)) S.etapa = 'w1';
   iniciando = false; erroCarga = ''; render();
 }
@@ -260,7 +270,7 @@ async function carregar(u) {
 const HORIZONTE = 36;
 function projecao() {
   const meses = [];
-  let saldo = S.saldo || 0;
+  let saldo = saldoTotal();
   for (let k = 0; k < HORIZONTE; k++) {
     const rec = sum(S.receitas, r => noMes(r, k));
     const fixas = sum(S.fixas, d => noMes(d, k));
@@ -344,13 +354,24 @@ function linhaFluxo(lista, it, tipos) {
   </div>`;
 }
 
+const linhaBanco = c => `<div class="linha banco ${c.banco === 'Outro' ? 'outro' : ''}">
+  <div class="field"><label for="b-${c.id}">Banco</label><select id="b-${c.id}" class="input" data-lista="contas" data-id="${c.id}" data-f="banco">${[...BANCOS, 'Outro'].map(b => `<option ${b === c.banco ? 'selected' : ''}>${b}</option>`).join('')}</select></div>
+  ${c.banco === 'Outro' ? `<div class="field"><label for="bo-${c.id}">Nome do banco</label><input id="bo-${c.id}" class="input" placeholder="Ex.: Sicredi" value="${esc(c.outro || '')}" data-lista="contas" data-id="${c.id}" data-f="outro"></div>` : ''}
+  <div class="field"><label for="bs-${c.id}">Saldo</label>${campoMoney('bs-' + c.id, c.saldo, `data-lista="contas" data-id="${c.id}" data-f="saldo"`)}</div>
+  <button class="del" data-act="del" data-lista="contas" data-id="${c.id}" aria-label="Remover banco">×</button></div>`;
 function renderEtapa(n) {
+  if (n === 1 && !S.contas.length) S.contas.push({ id: uid(), banco: BANCOS[0], saldo: 0 });
   let corpo = '';
   if (n === 1) {
     const tot = sum(S.receitas, mensal);
     corpo = `
       <div class="etapa-h"><span class="eyebrow2">Passo 1 de 5</span><h2>Quanto você tem e quanto entra</h2><p class="muted">Comece pelo dinheiro disponível hoje e depois as suas fontes de receita.</p></div>
-      <div class="field big-money"><label for="saldo">Saldo atual somando todas as suas contas</label>${campoMoney('saldo', S.saldo, 'data-f="saldo"')}<span class="faint small">Conta corrente, poupança e o que estiver disponível para usar. Investimentos de longo prazo ficam de fora.</span></div>
+      <div class="stack"><span class="lbl-s">Saldo atual em cada banco</span>
+        ${S.contas.map(linhaBanco).join('')}
+        <button class="add" data-act="addconta"><span class="plus">+</span>Adicionar outro banco</button>
+        <div class="total-bar"><span>Saldo total</span><b class="num" id="tot-saldo">${BRL(saldoTotal())}</b></div>
+        <span class="faint small">Conta corrente, poupança e o que estiver disponível para usar. Investimentos de longo prazo ficam de fora.</span>
+      </div>
       <div class="stack"><span class="lbl-s">Fontes de receita</span>
         ${S.receitas.map(r => linhaFluxo('receitas', r, S.tiposRec)).join('')}
         <button class="add" data-act="add" data-lista="receitas"><span class="plus">+</span>${S.receitas.length ? 'Adicionar outra fonte de receita' : 'Adicionar fonte de receita'}</button>
@@ -453,7 +474,7 @@ function renderPainel() {
             <div class="kpi"><span class="lbl">Resultado deste mês</span><span class="val" style="color:${m0.res < 0 ? 'var(--critical)' : 'var(--good)'}">${BRL(m0.res)}</span><span class="sub">${BRL(m0.rec)} entram · ${BRL(m0.desp)} saem</span></div>
             <div class="kpi"><span class="lbl">Renda comprometida</span><span class="val" style="color:${comp > 1 ? 'var(--critical)' : comp > .8 ? 'var(--warning)' : 'var(--good)'}">${NUM(comp * 100)}%</span><span class="sub">média dos próximos 12 meses</span></div>
             <div class="kpi"><span class="lbl">${P.colapso ? 'Seu saldo zera em' : 'Menor saldo previsto'}</span><span class="val" style="color:${P.colapso ? 'var(--critical)' : 'var(--ink)'}">${P.colapso ? cap(mAbbr(P.colapso.mes)) : BRL(minS.saldo)}</span><span class="sub">${P.colapso ? `e chega a ${BRL(minS.saldo)} em ${mAbbr(minS.mes)}` : `em ${mLong(minS.mes)}`}</span></div>
-            <div class="kpi"><span class="lbl">Saldo em ${mAbbr(P.meses[11].mes)}</span><span class="val" style="color:${P.meses[11].saldo < 0 ? 'var(--critical)' : 'var(--ink)'}">${BRL(P.meses[11].saldo)}</span><span class="sub">hoje: ${BRL(S.saldo)}</span></div>
+            <div class="kpi"><span class="lbl">Saldo em ${mAbbr(P.meses[11].mes)}</span><span class="val" style="color:${P.meses[11].saldo < 0 ? 'var(--critical)' : 'var(--ink)'}">${BRL(P.meses[11].saldo)}</span><span class="sub">hoje: ${BRL(saldoTotal())} em ${(S.contas || []).length} ${(S.contas || []).length === 1 ? 'banco' : 'bancos'}</span></div>
           </div>
         </div>
       </section>
@@ -545,6 +566,7 @@ document.addEventListener('click', ev => {
     case 'atualizarversao': gravar().then(() => { location.replace(location.pathname + '?v=' + encodeURIComponent(versaoNova || Date.now())); }); break;
     case 'add': { const it = novoItem(a.dataset.lista); lista(a.dataset.lista).push(it); save(); render(); focar(a.dataset.lista === 'emprestimos' ? '#ed-' + it.id : '#v-' + it.id); break; }
     case 'del': S[a.dataset.lista] = lista(a.dataset.lista).filter(x => x.id !== id); save(); render(); break;
+    case 'addconta': { const c = { id: uid(), banco: BANCOS.find(b => !S.contas.some(x => x.banco === b)) || 'Outro', saldo: 0 }; S.contas.push(c); save(); render(); focar('#bs-' + c.id); break; }
     case 'addcartao': { const c = { id: uid(), nome: '', faturas: [0], novo: 0 }; S.cartoes.push(c); save(); render(); focar('#cn-' + c.id); break; }
     case 'delcartao': S.cartoes = S.cartoes.filter(c => c.id !== id); save(); render(); break;
     case 'addfat': { const c = S.cartoes.find(x => x.id === id); c.faturas.push(0); save(); render(); focar(`#fv-${c.id}-${c.faturas.length - 1}`); break; }
@@ -562,7 +584,7 @@ document.addEventListener('click', ev => {
 function atualizarTotais() {
   const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
   const ass = sum(S.assinaturas, a => a.valor || 0);
-  set('tot-rec', BRL(sum(S.receitas, mensal))); set('tot-fix', BRL(sum(S.fixas, mensal))); set('tot-car', BRL(sum(S.cartoes, c => c.faturas[0] || 0)));
+  set('tot-saldo', BRL(saldoTotal())); set('tot-rec', BRL(sum(S.receitas, mensal))); set('tot-fix', BRL(sum(S.fixas, mensal))); set('tot-car', BRL(sum(S.cartoes, c => c.faturas[0] || 0)));
   set('tot-ass-m', `Assinaturas: ${BRL(ass)} por mês`); set('tot-ass-a', `${BRL(ass * 12)} por ano`); set('tot-emp', BRL(sum(S.emprestimos, e => e.valor || 0)));
 }
 /* digitação: atualiza o valor sem redesenhar (o cursor não pula); os totais são refeitos ao sair do campo */
@@ -570,10 +592,9 @@ document.addEventListener('input', ev => {
   const t = ev.target, f = t.dataset.f;
   if (t.dataset.fat !== undefined) { S.cartoes.find(c => c.id === t.dataset.cartao).faturas[+t.dataset.fat] = money(t.value); save(); atualizarTotais(); return; }
   if (t.dataset.cartao && f) { const c = S.cartoes.find(x => x.id === t.dataset.cartao); c[f] = f === 'nome' ? t.value : money(t.value); save(); return; }
-  if (f === 'saldo') { S.saldo = money(t.value); save(); return; }
   if (t.dataset.lista && t.tagName === 'INPUT' && t.type !== 'checkbox') {
     const it = lista(t.dataset.lista).find(x => x.id === t.dataset.id);
-    it[f] = f === 'valor' ? money(t.value) : f === 'restantes' ? Math.max(0, parseInt(t.value, 10) || 0) : t.value; save(); atualizarTotais();
+    it[f] = f === 'valor' || f === 'saldo' ? money(t.value) : f === 'restantes' ? Math.max(0, parseInt(t.value, 10) || 0) : t.value; save(); atualizarTotais();
   }
 });
 document.addEventListener('change', ev => {
@@ -585,6 +606,7 @@ document.addEventListener('change', ev => {
   if (t.tagName !== 'SELECT') return;
   if (f === 'tipo' && t.value === '__novo') { abrirNovoTipo(t, it); return; }
   it[f] = t.value; if (f === 'freq' && PRECISA_MES.includes(t.value) && !it.mes) it.mes = CUR; save(); render();
+  if (f === 'banco' && t.value === 'Outro') focar('#bo-' + it.id);
 });
 /* "Criar novo tipo…": troca o seletor por um campo de texto na própria linha */
 function abrirNovoTipo(sel, it) {
