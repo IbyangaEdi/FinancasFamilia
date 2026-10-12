@@ -557,7 +557,7 @@ const monthItems = (key = CUR, pessoa = 'pf') => inScope(S.lanc).filter(l => l.v
 const app = document.getElementById('app');
 const modalRoot = document.getElementById('modal-root');
 let loginTab = 'entrar', loginErr = '', invTipo = 'rf', invErr = '';
-let contaTipo = 'conta', contaErr = '', contaCor = 'roxo', saldoEdit = null, confirmConta = null;
+let contaTipo = 'conta', contaErr = '', contaCor = 'roxo', saldoEdit = null, confirmConta = null, confirmLanc = null;
 
 function render() {
   if (iniciando) { app.innerHTML = '<div class="login"><p class="muted">Carregando…</p></div>'; return; }
@@ -867,7 +867,9 @@ VIEWS.contas = () => {
           <td class="num">${dLabel(l.venc)}${isCard(l) ? '<div class="meta">fatura</div>' : ''}</td>
           <td><span class="pill ${cls}">${txt}</span></td>
           <td class="r num" style="font-weight:600;${l.tipo === 'receita' ? 'color:var(--good)' : ''}">${l.tipo === 'receita' ? '+' : ''}${BRL(l.valor)}</td>
-          <td class="r">${dono ? `<button class="btn link sm" data-act="editar" data-id="${l.id}">Editar</button>` : ''}</td>
+          <td class="r" style="white-space:nowrap">${!dono ? '' : confirmLanc === l.id
+            ? `<span class="small">Excluir?</span> <button class="btn danger sm" data-act="dellancok" data-id="${l.id}">Sim, excluir</button> <button class="btn ghost sm" data-act="dellanc" data-id="">Não</button>`
+            : `<button class="btn link sm" data-act="editar" data-id="${l.id}">Editar</button><button class="btn link sm" style="color:var(--critical)" data-act="dellanc" data-id="${l.id}" aria-label="Excluir ${esc(l.descricao)}">Excluir</button>`}</td>
         </tr>`; }).join('')}</tbody></table></div>`
       : `<div class="note">Nenhum lançamento neste filtro. Use “+ Novo lançamento” para adicionar despesas ou receitas deste mês.</div>`}
     <p class="faint small">Categorias em amarelo são não essenciais e entram nas sugestões de corte. Compras no cartão são pagas juntas, pela fatura.${grupo ? ' No grupo aparecem só os itens que cada pessoa marcou como compartilhados.' : ''}</p>
@@ -1691,7 +1693,9 @@ document.addEventListener('click', ev => {
     case 'mes': S.ui.month = v === '0' ? CUR : addM(S.ui.month || CUR, +v); save(); render(); break;
     case 'filtro': S.ui.filtro = v; save(); render(); break;
     case 'novo': openModal(null); break;
-    case 'editar': openModal(S.lanc.find(x => x.id === id)); break;
+    case 'editar': confirmLanc = null; openModal(S.lanc.find(x => x.id === id)); break;
+    case 'dellanc': confirmLanc = id || null; render(); break;
+    case 'dellancok': { const l = S.lanc.find(x => x.id === id); S.lanc = S.lanc.filter(x => x.id !== id); confirmLanc = null; save(); render(); if (l) toast(`“${l.descricao}” excluído`); break; }
     case 'fechar': case 'fecharfundo': closeModal(); break;
     case 'mtipo': readModal(); editState.tipo = v; if (v === 'receita' && isCard(editState)) { editState.contaId = null; editState.compra = null; } editState.categoria = v === 'despesa' ? 'Moradia' : 'Salário'; editState.essencial = true; drawModal(!!modalRoot.dataset.novo); break;
     case 'del': readModal(); editState.confirmDel = true; drawModal(false); break;
