@@ -17,7 +17,7 @@ def ler_env(caminho):
     return env
 
 def chamar(url, headers=None, data=None):
-    req = urllib.request.Request(url, headers=headers or {}, data=json.dumps(data).encode() if data else None,
+    req = urllib.request.Request(url, headers={'User-Agent': 'financas-familia/0.1', **(headers or {})}, data=json.dumps(data).encode() if data else None,
                                  method='POST' if data else 'GET')
     if data:
         req.add_header('Content-Type', 'application/json')

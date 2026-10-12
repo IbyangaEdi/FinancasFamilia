@@ -8,8 +8,8 @@ e Open Finance via Pluggy.
 - Destino: `financas.berluc.com.br` (GitHub Pages) + Supabase (login, dados, tarefas agendadas)
 
 ## Fases
-0. Contas e acessos ← **atual** (ver `FASE0.md`)
-1. Validação da Pluggy / Meu Pluggy (go/no-go)
+0. Contas e acessos ✅ (ver `FASE0.md`)
+1. Validação da Pluggy / Meu Pluggy (go/no-go) ← **próxima**
 2. Base: banco de dados, regras de acesso, login
 3. Telas com dados reais
 4. Publicação em financas.berluc.com.br
