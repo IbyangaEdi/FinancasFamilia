@@ -216,12 +216,11 @@ function projecao() {
     const fixas = sum(S.fixas, d => noMes(d, k));
     /* fatura do cartão: o valor informado para o mês + compras novas a partir do mês seguinte */
     const cartoes = sum(S.cartoes, c => (c.faturas[k] || 0) + (k >= 1 ? (c.novo || 0) : 0));
-    /* assinatura no cartão já está na fatura atual; nos meses seguintes ela soma */
-    const assin = sum(S.assinaturas, a => (a.cartao && k === 0) ? 0 : (a.valor || 0));
+    /* assinaturas não entram no cálculo: já estão nas faturas ou nas despesas; o painel só mostra o total e a economia possível */
     const emp = sum(S.emprestimos, e => k < (e.restantes || 0) ? (e.valor || 0) : 0);
-    const desp = fixas + cartoes + assin + emp;
+    const desp = fixas + cartoes + emp;
     saldo += rec - desp;
-    meses.push({ k, mes: addM(CUR, k), rec, desp, fixas, cartoes, assin, emp, res: rec - desp, saldo });
+    meses.push({ k, mes: addM(CUR, k), rec, desp, fixas, cartoes, emp, res: rec - desp, saldo });
   }
   let eq = null;
   for (let j = meses.length - 1; j >= 0; j--) { if (meses[j].res >= -0.005) eq = j; else break; }
@@ -337,7 +336,7 @@ function renderEtapa(n) {
       <div class="stack">${S.assinaturas.map(assinLinha).join('')}
         <button class="add" data-act="addassin"><span class="plus">+</span>Adicionar assinatura</button></div>
       ${S.assinaturas.length ? `<div class="total-bar"><span id="tot-ass-m">Assinaturas: ${BRL(tot)} por mês</span><b class="num" id="tot-ass-a">${BRL(tot * 12)} por ano</b></div>` : ''}
-      <p class="faint small">Marque “cobrada no cartão” quando ela já estiver na fatura atual que você informou. Assim ela não conta duas vezes neste mês.</p>`;
+      <p class="faint small">As assinaturas não entram no cálculo do ponto de equilíbrio (elas já estão nas faturas ou nas despesas). No painel você vê quanto elas somam e quanto daria para economizar.</p>`;
   }
   if (n === 5) {
     corpo = `
@@ -359,10 +358,9 @@ function renderEtapa(n) {
         <button class="btn primary" data-act="seguir">${n < 5 ? 'Continuar' : 'Gerar meu painel'}</button></div>
     </section>${faixaModelo()}</div>`;
 }
-const assinLinha = a => `<div class="linha" style="grid-template-columns:minmax(140px,1.4fr) minmax(120px,1fr) auto auto">
+const assinLinha = a => `<div class="linha" style="grid-template-columns:minmax(140px,1.4fr) minmax(120px,1fr) auto">
   <div class="field"><label for="an-${a.id}">Nome</label><input id="an-${a.id}" class="input" value="${esc(a.nome)}" placeholder="Ex.: Netflix" data-lista="assinaturas" data-id="${a.id}" data-f="nome"></div>
   <div class="field"><label for="av-${a.id}">Valor por mês</label>${campoMoney('av-' + a.id, a.valor, `data-lista="assinaturas" data-id="${a.id}" data-f="valor"`)}</div>
-  <label class="check-row" style="padding-bottom:10px"><input type="checkbox" ${a.cartao ? 'checked' : ''} data-lista="assinaturas" data-id="${a.id}" data-f="cartao"> cobrada no cartão</label>
   <button class="del" data-act="del" data-lista="assinaturas" data-id="${a.id}" aria-label="Remover">×</button></div>`;
 
 /* ---------- painel ---------- */
@@ -379,7 +377,7 @@ function renderPainel() {
   } else { titulo = `Não acontece nos próximos ${HORIZONTE / 12} anos`; cls = 'crit'; texto = `Do jeito que está, as saídas continuam maiores que as receitas. Falta em média ${BRL(-sum(P.meses.slice(-12), m => m.res) / 12)} por mês. Veja abaixo para onde vai o dinheiro.`; }
   const comp = rendaMes ? sum(P.meses.slice(0, 12), m => m.desp) / 12 / rendaMes : 0;
   const minS = P.meses.reduce((a, m) => m.saldo < a.saldo ? m : a, P.meses[0]);
-  const por = [['Despesas fixas', m0.fixas, 'var(--accent)'], ['Cartões de crédito', m0.cartoes, 'var(--gold)'], ['Empréstimos e financiamentos', m0.emp, 'var(--warning)'], ['Assinaturas', sum(S.assinaturas, a => a.valor || 0), 'var(--critical)']].filter(x => x[1] > 0);
+  const por = [['Despesas fixas', m0.fixas, 'var(--accent)'], ['Cartões de crédito', m0.cartoes, 'var(--gold)'], ['Empréstimos e financiamentos', m0.emp, 'var(--warning)']].filter(x => x[1] > 0);
   const maxPor = Math.max(1, ...por.map(x => x[1]));
   const totAss = sum(S.assinaturas, a => a.valor || 0);
   app.innerHTML = `<div class="wrap">${topo('Seu painel')}
@@ -415,8 +413,12 @@ function renderPainel() {
       </section>
 
       <section class="card c6">
-        <div class="spread"><h2>Assinaturas</h2><span class="pill neutral">${BRL(totAss)}/mês · ${BRL(totAss * 12)}/ano</span></div>
-        <div class="list">${S.assinaturas.map(a => `<div class="li"><div class="grow"><b class="small">${esc(a.nome || 'Sem nome')}</b><div class="faint small">${a.cartao ? 'no cartão' : 'débito / boleto'}</div></div><span class="num small">${BRL(a.valor)}</span><button class="del" data-act="delassinp" data-id="${a.id}" aria-label="Remover ${esc(a.nome)}">×</button></div>`).join('') || '<p class="muted small">Nenhuma assinatura cadastrada.</p>'}</div>
+        <div class="spread"><h2>Assinaturas</h2><span class="pill neutral">${S.assinaturas.length} ${S.assinaturas.length === 1 ? 'assinatura' : 'assinaturas'}</span></div>
+        <div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+          <div class="kpi"><span class="lbl">Total em assinaturas</span><span class="val">${BRL(totAss)}<span class="faint small">/mês</span></span><span class="sub">${BRL(totAss * 12)} por ano</span></div>
+          <div class="kpi" style="background:var(--good-soft)"><span class="lbl">Cancelando 30% delas</span><span class="val" style="color:var(--good)">${BRL(totAss * .3)}<span class="faint small">/mês</span></span><span class="sub">${BRL(totAss * .3 * 12)} de economia por ano</span></div>
+        </div>
+        <div class="list">${S.assinaturas.map(a => `<div class="li"><div class="grow"><b class="small">${esc(a.nome || 'Sem nome')}</b></div><span class="num small">${BRL(a.valor)}</span><button class="del" data-act="delassinp" data-id="${a.id}" aria-label="Remover ${esc(a.nome)}">×</button></div>`).join('') || '<p class="muted small">Nenhuma assinatura cadastrada.</p>'}</div>
         <form class="row" id="f-assin" novalidate>
           <input id="na-nome" class="input" placeholder="Nova assinatura" style="flex:2;min-width:140px">
           <div class="money" style="flex:1;min-width:110px"><span>R$</span><input id="na-valor" class="input" inputmode="decimal" placeholder="0,00"></div>
@@ -430,7 +432,7 @@ function renderPainel() {
           : '<p class="muted small">Nenhuma parcela ou financiamento terminando no período. Informe as próximas faturas e os empréstimos para ver aqui.</p>'}
       </section>
 
-      <p class="faint small c12">Como calculamos: receitas e despesas fixas pela frequência informada; cartões pelas faturas que você informou, mais as compras novas a partir do mês que vem; assinaturas todo mês; empréstimos até a última parcela. Ponto de equilíbrio é o primeiro mês a partir do qual as receitas cobrem as saídas todos os meses.</p>
+      <p class="faint small c12">Como calculamos: receitas e despesas fixas pela frequência informada; cartões pelas faturas que você informou, mais as compras novas a partir do mês que vem; empréstimos até a última parcela. Assinaturas aparecem só no quadro delas e não entram na conta. Ponto de equilíbrio é o primeiro mês a partir do qual as receitas cobrem as saídas todos os meses.</p>
     </div>${faixaModelo()}</div>`;
 }
 function grafico(P) {
@@ -486,7 +488,7 @@ document.addEventListener('click', ev => {
     case 'delcartao': S.cartoes = S.cartoes.filter(c => c.id !== id); save(); render(); break;
     case 'addfat': { const c = S.cartoes.find(x => x.id === id); c.faturas.push(0); save(); render(); focar(`#fv-${c.id}-${c.faturas.length - 1}`); break; }
     case 'delfat': { const c = S.cartoes.find(x => x.id === id); c.faturas.pop(); save(); render(); break; }
-    case 'addassin': { const it = { id: uid(), nome: v || '', valor: 0, cartao: true }; S.assinaturas.push(it); save(); render(); focar(v ? '#av-' + it.id : '#an-' + it.id); break; }
+    case 'addassin': { const it = { id: uid(), nome: v || '', valor: 0 }; S.assinaturas.push(it); save(); render(); focar(v ? '#av-' + it.id : '#an-' + it.id); break; }
     case 'delassinp': S.assinaturas = S.assinaturas.filter(x => x.id !== id); save(); render(); break;
     case 'ir': S.etapa = 'w' + v; save(); render(); window.scrollTo({ top: 0 }); break;
     case 'voltar': S.etapa = 'w' + (+S.etapa.slice(1) - 1); save(); render(); window.scrollTo({ top: 0 }); break;
@@ -546,7 +548,7 @@ document.addEventListener('submit', ev => {
   if (ev.target.id === 'f-assin') {
     const nome = document.getElementById('na-nome').value.trim(), valor = money(document.getElementById('na-valor').value);
     if (!nome || !valor) { toast('Informe o nome e o valor da assinatura'); return; }
-    S.assinaturas.push({ id: uid(), nome, valor, cartao: true }); save(); render(); toast(`${nome} adicionada`);
+    S.assinaturas.push({ id: uid(), nome, valor }); save(); render(); toast(`${nome} adicionada`);
   }
 });
 /* ao sair de um campo de dinheiro, mostra formatado */
