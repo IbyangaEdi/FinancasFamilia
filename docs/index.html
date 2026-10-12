@@ -558,6 +558,7 @@ const app = document.getElementById('app');
 const modalRoot = document.getElementById('modal-root');
 let loginTab = 'entrar', loginErr = '', invTipo = 'rf', invErr = '';
 let contaTipo = 'conta', contaErr = '', contaCor = 'roxo', saldoEdit = null, confirmConta = null, confirmLanc = null;
+const selecionados = new Set(); let confirmLote = false, loteSerie = false;
 
 function render() {
   if (iniciando) { app.innerHTML = '<div class="login"><p class="muted">Carregando…</p></div>'; return; }
@@ -856,11 +857,22 @@ VIEWS.contas = () => {
         ${us.map(c => `<option value="${c.id}" ${S.ui.contaFiltro === c.id ? 'selected' : ''}>${esc(contaLabel(c))}</option>`).join('')}
       </select>
     </div>
+    ${(() => { /* barra da seleção múltipla */
+      const sel = list.filter(l => selecionados.has(l.id)); if (!sel.length) return '';
+      const temSerie = sel.some(l => l.serie && S.lanc.some(x => x.serie === l.serie && x.venc > l.venc && !selecionados.has(x.id)));
+      return `<div class="spread note" style="background:var(--accent-soft);color:var(--ink)">
+        <span><b>${sel.length}</b> ${sel.length === 1 ? 'lançamento selecionado' : 'lançamentos selecionados'} · <span class="num">${BRL(sum(sel, l => l.valor))}</span></span>
+        ${confirmLote
+          ? `<div class="row">${temSerie ? `<label class="check-row small"><input type="checkbox" id="lote-serie" data-chg="loteserie" ${loteSerie ? 'checked' : ''}> Excluir também os meses seguintes das parcelas/assinaturas</label>` : ''}
+              <span class="small">Excluir ${sel.length}?</span><button class="btn danger sm" data-act="loteok">Sim, excluir</button><button class="btn ghost sm" data-act="lotecancel">Cancelar</button></div>`
+          : `<div class="row"><button class="btn danger sm" data-act="lote">Excluir selecionados</button><button class="btn link sm" data-act="selnenhum">Limpar seleção</button></div>`}
+      </div>`; })()}
     ${list.length ? `<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th style="width:40px"><span class="faint">Pago</span></th><th>Descrição</th><th>Categoria</th><th>Conta / cartão</th><th>Vencimento</th><th>Situação</th><th class="r">Valor</th><th></th></tr></thead>
+      <thead><tr><th style="width:34px"><input type="checkbox" id="sel-todos" data-chg="seltodos" aria-label="Selecionar todos os lançamentos desta lista" ${list.filter(l => l.ownerId === S.session).length && list.filter(l => l.ownerId === S.session).every(l => selecionados.has(l.id)) ? 'checked' : ''} style="width:17px;height:17px;accent-color:var(--accent)"></th><th style="width:40px"><span class="faint">Pago</span></th><th>Descrição</th><th>Categoria</th><th>Conta / cartão</th><th>Vencimento</th><th>Situação</th><th class="r">Valor</th><th></th></tr></thead>
       <tbody>${list.map(l => {
         const [cls, txt] = situacao(l); const dono = l.ownerId === S.session;
-        return `<tr class="${l.pago ? 'is-paid' : ''}">
+        return `<tr class="${l.pago ? 'is-paid' : ''}" ${selecionados.has(l.id) ? 'style="background:var(--accent-soft)"' : ''}>
+          <td><input type="checkbox" data-chg="sel" data-id="${l.id}" ${selecionados.has(l.id) ? 'checked' : ''} ${dono ? '' : 'disabled title="Só quem lançou pode excluir"'} aria-label="Selecionar ${esc(l.descricao)}" style="width:17px;height:17px;accent-color:var(--accent)"></td>
           <td><button class="chk" data-act="pago" data-id="${l.id}" aria-pressed="${l.pago}" aria-label="Marcar ${esc(l.descricao)} como ${l.tipo === 'receita' ? 'recebida' : 'paga'}">${CHECK_SVG}</button></td>
           <td><div class="desc">${esc(l.descricao)}</div><div class="meta">${l.compra ? 'Compra ' + dLabel(l.compra) + ' · ' : ''}${l.parcela ? 'Parcela ' + l.parcela + ' · ' : ''}${grupo ? esc(userName(l.ownerId)) : (l.compartilhado ? 'Compartilhado' : 'Só você')}${l.fitid ? ' · conferido no extrato' : ''}</div></td>
           <td>${l.tipo === 'receita' ? `<span class="pill acc">${esc(l.categoria)}</span>` : `<span class="pill ${l.essencial ? 'neutral' : 'gold'}">${esc(l.categoria)}</span>`}</td>
@@ -1457,13 +1469,17 @@ function autoMap(h) {
   const reais = moeda.filter(o => !/\bUS\b|USD|DOLAR|DOLLAR|COTACAO|CAMBIO|\bTAXA\b|IOF|\bEUR\b|EURO/.test(o.x));
   const brl = reais.find(o => /\bR\b|BRL|REAIS/.test(o.x)) || reais[0];
   return { data: f(/^(DATA|DATE|DT)\b/), desc: f(/DESCRI|HISTORICO|TITLE|ESTABELEC|LANCAMENTO|MEMO|DETALHE/), valor: brl ? brl.i : -1,
+    parcela: N.findIndex(x => /PARCELA|^PARC\b|PRESTACAO|INSTALLMENT/.test(x) && !/VALOR|AMOUNT/.test(x)),
     id: f(/IDENTIFICADOR|^ID$/), inverter: false, ambiguo: moeda.length > 1 };
 }
+/* coluna "Parcela" do CSV: "10/12", "10 de 12", "Parcela 10/12"; "Única", "-" ou vazio = à vista */
+const parcelaColuna = v => { const m = String(v || '').match(/(\d{1,2})\s*(?:\/|DE|de)\s*(\d{1,2})/); return m && +m[1] >= 1 && +m[2] >= 2 && +m[1] <= +m[2] ? { i: +m[1], n: +m[2], txt: '' } : null; };
 function csvTrans(rows, map) {
   const vistos = {};
-  return rows.slice(1).map(r => ({ data: dataBR(r[map.data]), valor: numBR(r[map.valor]) * (map.inverter ? -1 : 1), desc: r[map.desc] || '', fitid: map.id >= 0 ? r[map.id] : '' }))
+  return rows.slice(1).map(r => ({ data: dataBR(r[map.data]), valor: numBR(r[map.valor]) * (map.inverter ? -1 : 1), desc: r[map.desc] || '', fitid: map.id >= 0 ? r[map.id] : '',
+      parc: map.parcela >= 0 ? parcelaColuna(r[map.parcela]) : null }))
     .filter(t => t.data && isFinite(t.valor))
-    .map(t => { if (t.fitid) return t; const base = `${t.data}|${t.valor.toFixed(2)}|${norm(t.desc)}`; vistos[base] = (vistos[base] || 0) + 1; return { ...t, fitid: 'h:' + base + '|' + vistos[base] }; });
+    .map(t => { if (t.fitid) return t; const base = `${t.data}|${t.valor.toFixed(2)}|${norm(t.desc)}${t.parc ? '|' + t.parc.i + '/' + t.parc.n : ''}`; vistos[base] = (vistos[base] || 0) + 1; return { ...t, fitid: 'h:' + base + '|' + vistos[base] }; });
 }
 /* monta a tela de conferência: o que é novo, o que já existe, o que paga fatura */
 function montarRevisao(conta, parsed) {
@@ -1476,7 +1492,9 @@ function montarRevisao(conta, parsed) {
   return trans.map((t, i) => {
     const tipo = t.valor < 0 ? 'despesa' : 'receita', valor = Math.round(Math.abs(t.valor) * 100) / 100;
     const r = { i, data: t.data, desc: t.desc, valor, tipo, fitid: t.fitid, incluir: true, status: 'nova', parcela: null };
-    r.parc = lerParcela(t.desc, card); if (r.parc) r.parcela = `${r.parc.i}/${r.parc.n}`;
+    const pd = lerParcela(t.desc, card);
+    r.parc = t.parc ? { ...t.parc, txt: pd && pd.i === t.parc.i && pd.n === t.parc.n ? pd.txt : '' } : pd;
+    if (r.parc) r.parcela = `${r.parc.i}/${r.parc.n}`;
     if (fitids.has(t.fitid)) { r.status = 'dup'; r.incluir = false; }
     else if (card && tipo === 'receita') { r.status = 'pgto'; r.incluir = false; }
     else {
@@ -1539,7 +1557,8 @@ function gerarFuturos(base, modo) {
   const mesmo = (l, venc) => l.id !== base.id && l.tipo === base.tipo && l.contaId === base.contaId && l.venc.slice(0, 7) === venc.slice(0, 7)
     && (l.serie === serie || chaveRegra(l.descricao) === chaveB);
   if (modo === 'parcela') {
-    const p = lerParcela(base.descricao, true) || (base.parcela ? { i: +base.parcela.split('/')[0], n: +base.parcela.split('/')[1], txt: '' } : null);
+    const pd = lerParcela(base.descricao, true), pp = base.parcela ? { i: +base.parcela.split('/')[0], n: +base.parcela.split('/')[1] } : null;
+    const p = pp ? { ...pp, txt: pd && pd.i === pp.i && pd.n === pp.n ? pd.txt : '' } : pd;
     if (!p) return criados;
     for (let k = p.i + 1; k <= p.n; k++) {
       const pos = mesSeguinte(base, k - p.i), parc = `${k}/${p.n}`;
@@ -1606,7 +1625,8 @@ function processarArquivo(nome, txt) {
   const rows = splitCSV(txt);
   if (rows.length < 2 || rows[0].length < 2) { imp.erro = 'Formato não reconhecido. Use o arquivo OFX ou CSV exportado pelo banco.'; drawImport(); return; }
   const salvo = S.csvMap[imp.contaId] && S.csvMap[imp.contaId].n === rows[0].length ? S.csvMap[imp.contaId] : null;
-  const map = salvo || autoMap(rows[0]);
+  const map = salvo ? { ...salvo } : autoMap(rows[0]);
+  if (map.parcela === undefined) map.parcela = autoMap(rows[0]).parcela;   /* mapas salvos antes da coluna Parcela */
   imp.csv = { rows, map };
   /* sem mapa salvo: pergunta sempre que faltar coluna ou houver mais de uma coluna de valor (ex.: dólar, cotação e reais) */
   if (map.data < 0 || map.valor < 0 || map.desc < 0 || (!salvo && map.ambiguo)) { imp.step = 'mapear'; drawImport(); return; }
@@ -1710,7 +1730,7 @@ function drawImport() {
   if (imp.step === 'mapear') {
     const h = imp.csv.rows[0], m = imp.csv.map, sel = (id, k, rot) => `<div class="field"><label for="${id}">${rot}</label><select id="${id}" class="input"><option value="-1">—</option>${h.map((x, i) => `<option value="${i}" ${m[k] === i ? 'selected' : ''}>${esc(x || 'Coluna ' + (i + 1))}</option>`).join('')}</select></div>`;
     corpo = `<p class="small muted">${m.ambiguo && m.data >= 0 && m.desc >= 0 ? 'Esta planilha tem mais de uma coluna de valor. Confira qual é o <b>valor em reais</b> que deve ser lançado.' : 'Não reconheci todas as colunas desta planilha. Diga qual coluna é cada informação.'} O sistema guarda a resposta para os próximos arquivos desta conta.</p>
-      <div class="fgrid">${sel('imp-m-data', 'data', 'Data')}${sel('imp-m-desc', 'desc', 'Descrição')}${sel('imp-m-valor', 'valor', 'Valor (em reais)')}
+      <div class="fgrid">${sel('imp-m-data', 'data', 'Data')}${sel('imp-m-desc', 'desc', 'Descrição')}${sel('imp-m-valor', 'valor', 'Valor (em reais)')}${sel('imp-m-parc', 'parcela', 'Parcela (opcional)')}
         <label class="check-row" style="align-self:end"><input type="checkbox" id="imp-m-inv" ${m.inverter ? 'checked' : ''}> Os gastos aparecem como valores positivos</label></div>
       <div class="tbl-wrap"><table class="tbl" style="min-width:0"><thead><tr>${h.map(x => `<th>${esc(x)}</th>`).join('')}</tr></thead><tbody>${imp.csv.rows.slice(1, 5).map(r => `<tr>${r.map(x => `<td class="small">${esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
       <div class="spread"><button class="btn ghost" data-act="impvoltar">Voltar</button><button class="btn primary" data-act="impmapok">Continuar</button></div>`;
@@ -1787,7 +1807,7 @@ document.addEventListener('click', ev => {
       save(); render(); toast(r.novo ? `Fatura paga: ${BRL(r.valor)} saiu da ${contaLabel(contaById(c.pagaCom))}` : 'Fatura reaberta'); break;
     }
     case 'saldoedit': saldoEdit = id || null; render(); if (id) setTimeout(() => document.getElementById('sal-' + id)?.select(), 0); break;
-    case 'pessoa': S.ui.pessoa = v; S.ui.contaFiltro = ''; save(); render(); break;
+    case 'pessoa': selecionados.clear(); confirmLote = false; S.ui.pessoa = v; S.ui.contaFiltro = ''; save(); render(); break;
     case 'verpj': S.ui.pessoa = 'pj'; S.ui.contaFiltro = ''; S.ui.filtro = 'todas'; S.ui.month = CUR; S.ui.tab = 'contas'; save(); render(); window.scrollTo({ top: 0 }); break;
     case 'vercontas': S.ui.pessoa = pessoaC(contaById(id)); S.ui.contaFiltro = id; S.ui.filtro = 'todas'; S.ui.month = CUR; S.ui.tab = 'contas'; save(); render(); window.scrollTo({ top: 0 }); break;
     case 'delconta': confirmConta = id || null; render(); break;
@@ -1811,7 +1831,7 @@ document.addEventListener('click', ev => {
     case 'improw': { const r = imp.rows[+a.dataset.i]; r.incluir = !r.incluir; drawImport(); break; }
     case 'impmapok': {
       const g = id => +document.getElementById(id).value;
-      const map = { data: g('imp-m-data'), desc: g('imp-m-desc'), valor: g('imp-m-valor'), id: -1, inverter: document.getElementById('imp-m-inv').checked, n: imp.csv.rows[0].length };
+      const map = { data: g('imp-m-data'), desc: g('imp-m-desc'), valor: g('imp-m-valor'), parcela: g('imp-m-parc'), id: imp.csv.map.id ?? -1, inverter: document.getElementById('imp-m-inv').checked, n: imp.csv.rows[0].length };
       if (map.data < 0 || map.desc < 0 || map.valor < 0) { toast('Escolha as colunas de data, descrição e valor'); break; }
       S.csvMap[imp.contaId] = map; save(); irRevisao({ formato: 'CSV', trans: csvTrans(imp.csv.rows, map), saldo: null }); break;
     }
@@ -1821,11 +1841,21 @@ document.addEventListener('click', ev => {
     }
     case 'ctipo': contaTipo = v; contaErr = ''; render(); break;
     case 'ccor': contaCor = v; document.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); break;
-    case 'mes': S.ui.month = v === '0' ? CUR : addM(S.ui.month || CUR, +v); save(); render(); break;
-    case 'filtro': S.ui.filtro = v; save(); render(); break;
+    case 'mes': selecionados.clear(); confirmLote = false; S.ui.month = v === '0' ? CUR : addM(S.ui.month || CUR, +v); save(); render(); break;
+    case 'filtro': selecionados.clear(); confirmLote = false; S.ui.filtro = v; save(); render(); break;
     case 'novo': openModal(null); break;
     case 'editar': confirmLanc = null; openModal(S.lanc.find(x => x.id === id)); break;
     case 'dellanc': confirmLanc = id || null; render(); break;
+    case 'lote': confirmLote = true; loteSerie = false; render(); break;
+    case 'lotecancel': confirmLote = false; render(); break;
+    case 'selnenhum': selecionados.clear(); confirmLote = false; render(); break;
+    case 'loteok': {
+      const alvo = S.lanc.filter(l => selecionados.has(l.id) && l.ownerId === S.session);
+      const apagar = new Set(alvo.map(l => l.id));
+      if (loteSerie) for (const l of alvo) if (l.serie) S.lanc.forEach(x => { if (x.serie === l.serie && x.venc >= l.venc && x.ownerId === S.session) apagar.add(x.id); });
+      S.lanc = S.lanc.filter(l => !apagar.has(l.id));
+      selecionados.clear(); confirmLote = false; save(); render(); toast(`${apagar.size} ${apagar.size === 1 ? 'lançamento excluído' : 'lançamentos excluídos'}`); break;
+    }
     case 'dellancok': {
       const l = S.lanc.find(x => x.id === id); if (!l) break;
       const antes = S.lanc.length;
@@ -1882,7 +1912,13 @@ document.addEventListener('change', ev => {
   if (k === 'impfut') { const r = imp.rows[+t.dataset.i]; r.futuro = t.checked; drawImport(); }
   if (k === 'futsel') { futModal[+t.dataset.i].on = t.checked; }
   if (k === 'impsaldo') { imp.aplicarSaldo = t.checked; }
-  if (k === 'contafiltro') { S.ui.contaFiltro = t.value; save(); render(); }
+  if (k === 'sel') { if (t.checked) selecionados.add(t.dataset.id); else selecionados.delete(t.dataset.id); confirmLote = false; render(); }
+  if (k === 'seltodos') {
+    const ids = [...document.querySelectorAll('input[data-chg="sel"]:not(:disabled)')].map(x => x.dataset.id);
+    ids.forEach(id => t.checked ? selecionados.add(id) : selecionados.delete(id)); confirmLote = false; render();
+  }
+  if (k === 'loteserie') { loteSerie = t.checked; }
+  if (k === 'contafiltro') { selecionados.clear(); confirmLote = false; S.ui.contaFiltro = t.value; save(); render(); }
   if (k === 'mconta') { if (editState) { readModal(); drawModal(!!modalRoot.dataset.novo); } }
   if (k === 'scope') { S.ui.scope[S.session] = t.value; save(); render(); }
   if (k === 'cortepct') { S.ui.cortes[t.dataset.id + ':pct'] = +t.value; save(); render(); }
