@@ -1477,25 +1477,32 @@ const parcelaColuna = v => { const m = String(v || '').match(/(\d{1,2})\s*(?:\/|
 function csvTrans(rows, map) {
   const vistos = {};
   return rows.slice(1).map(r => ({ data: dataBR(r[map.data]), valor: numBR(r[map.valor]) * (map.inverter ? -1 : 1), desc: r[map.desc] || '', fitid: map.id >= 0 ? r[map.id] : '',
-      parc: map.parcela >= 0 ? parcelaColuna(r[map.parcela]) : null }))
+      parc: map.parcela >= 0 ? parcelaColuna(r[map.parcela]) : null, parcCol: map.parcela >= 0 }))
     .filter(t => t.data && isFinite(t.valor))
-    .map(t => { if (t.fitid) return t; const base = `${t.data}|${t.valor.toFixed(2)}|${norm(t.desc)}${t.parc ? '|' + t.parc.i + '/' + t.parc.n : ''}`; vistos[base] = (vistos[base] || 0) + 1; return { ...t, fitid: 'h:' + base + '|' + vistos[base] }; });
+    .map(t => {
+      if (t.fitid) return t;
+      const antigo = `${t.data}|${t.valor.toFixed(2)}|${norm(t.desc)}`, base = antigo + (t.parc ? '|' + t.parc.i + '/' + t.parc.n : '');
+      vistos[base] = (vistos[base] || 0) + 1; vistos['a|' + antigo] = (vistos['a|' + antigo] || 0) + 1;
+      return { ...t, fitid: 'h:' + base + '|' + vistos[base], fitidAntigo: 'h:' + antigo + '|' + vistos['a|' + antigo] };
+    });
 }
 /* monta a tela de conferência: o que é novo, o que já existe, o que paga fatura */
 function montarRevisao(conta, parsed) {
   const pj = pessoaC(conta) === 'pj', card = conta.tipo === 'cartao';
   let trans = parsed.trans.slice().sort((a, b) => a.data.localeCompare(b.data));
   if (card && trans.filter(t => t.valor > 0).length > trans.length / 2) trans = trans.map(t => ({ ...t, valor: -t.valor }));
-  const usados = new Set(), fitids = new Set(S.lanc.filter(l => l.contaId === conta.id && l.fitid).map(l => l.fitid));
+  const usados = new Set(), porFitid = new Map(S.lanc.filter(l => l.contaId === conta.id && l.fitid).map(l => [l.fitid, l]));
   const cartoesPagos = S.contas.filter(k => k.tipo === 'cartao' && k.pagaCom === conta.id);
   const ref = l => card ? (l.compra || l.venc) : (l.pago && l.pagoEm ? l.pagoEm : l.venc);
   return trans.map((t, i) => {
     const tipo = t.valor < 0 ? 'despesa' : 'receita', valor = Math.round(Math.abs(t.valor) * 100) / 100;
     const r = { i, data: t.data, desc: t.desc, valor, tipo, fitid: t.fitid, incluir: true, status: 'nova', parcela: null };
     const pd = lerParcela(t.desc, card);
-    r.parc = t.parc ? { ...t.parc, txt: pd && pd.i === t.parc.i && pd.n === t.parc.n ? pd.txt : '' } : pd;
+    r.parc = t.parc ? { ...t.parc, txt: pd && pd.i === t.parc.i && pd.n === t.parc.n ? pd.txt : '' } : (t.parcCol ? null : pd);
     if (r.parc) r.parcela = `${r.parc.i}/${r.parc.n}`;
-    if (fitids.has(t.fitid)) { r.status = 'dup'; r.incluir = false; }
+    const jaImp = porFitid.get(t.fitid) || (t.fitidAntigo && porFitid.get(t.fitidAntigo));
+    if (jaImp && r.parc && jaImp.parcela !== r.parcela) { r.status = 'corrigir'; r.matchId = jaImp.id; usados.add(jaImp.id); }
+    else if (jaImp) { r.status = 'dup'; r.incluir = false; }
     else if (card && tipo === 'receita') { r.status = 'pgto'; r.incluir = false; }
     else {
       if (!card && tipo === 'despesa') for (const k of cartoesPagos) {
@@ -1546,7 +1553,7 @@ function lerParcela(desc, card) {
 const descParcela = (desc, txt, k, n) => desc.replace(txt, txt.replace(/(\d{1,2})(\s*(?:\/|DE)\s*)(\d{1,2})/i, (_, a, sep) => pad(k) + sep + pad(n)));
 function mesSeguinte(base, k) {
   const card = isCard(base) ? contaById(base.contaId) : null;
-  if (card) { const ref = base.compra || base.venc, d = dateIn(addM(ref.slice(0, 7), k), +ref.slice(8)); return { compra: d, venc: faturaVenc(card, d) }; }
+  if (card) return { compra: base.compra ? dateIn(addM(base.compra.slice(0, 7), k), +base.compra.slice(8)) : null, venc: dateIn(addM(base.venc.slice(0, 7), k), card.venc) };
   return { compra: null, venc: dateIn(addM(base.venc.slice(0, 7), k), +base.venc.slice(8)) };
 }
 const novoFuturo = (base, extra) => ({ id: uid(), ownerId: base.ownerId || S.session, tipo: base.tipo, descricao: base.descricao, valor: base.valor, contaId: base.contaId,
@@ -1634,19 +1641,15 @@ function processarArquivo(nome, txt) {
 }
 function confirmarImport() {
   const c = contaById(imp.contaId), card = c.tipo === 'cartao', pj = pessoaC(c) === 'pj';
-  const res = { novos: 0, casados: 0, faturas: 0, regras: 0 }, bases = [];
+  const res = { novos: 0, casados: 0, faturas: 0, regras: 0, corrigidos: 0 }, bases = [];
   /* fatura deste arquivo: a mais comum entre as compras à vista (ou a da compra mais recente) */
   let alvo = null;
   if (card) {
-    const cont = {}; imp.rows.filter(r => r.incluir && !r.parc && r.tipo === 'despesa').forEach(r => { const v = faturaVenc(c, r.data); cont[v] = (cont[v] || 0) + 1; });
+    const cont = {}; imp.rows.filter(r => !r.parc && r.tipo === 'despesa' && r.status !== 'pgto').forEach(r => { const v = faturaVenc(c, r.data); cont[v] = (cont[v] || 0) + 1; });
     alvo = (Object.entries(cont).sort((a, b) => b[1] - a[1])[0] || [])[0] || faturaVenc(c, imp.rows.map(r => r.data).sort().pop());
   }
-  /* muitos bancos mostram a parcela 10/12 com a data da compra original: nesse caso ela é cobrada (parcela − 1) meses depois */
-  const compraEfetiva = r => {
-    if (!card || !r.parc || r.parc.i === 1) return r.data;
-    const desl = dateIn(addM(r.data.slice(0, 7), r.parc.i - 1), +r.data.slice(8)), dist = d => Math.abs(days(faturaVenc(c, d), alvo));
-    return dist(desl) < dist(r.data) ? desl : r.data;
-  };
+  /* parcela 2 em diante veio nesta fatura (os bancos mostram a data da compra original): pertence à fatura deste arquivo */
+  const vencEfetivo = r => card ? (r.parc && r.parc.i > 1 && alvo ? alvo : faturaVenc(c, r.data)) : r.data;
   for (const r of imp.rows) {
     if (!r.incluir || r.status === 'dup' || r.status === 'pgto') continue;
     if (r.cat && r.cat !== r.catSug) { S.regras[regraId(pj, r.tipo, r.desc)] = r.cat; res.regras++; }
@@ -1654,6 +1657,14 @@ function confirmarImport() {
       toggleFatura(r.fatura.cardId, r.fatura.venc, true);
       S.lanc.filter(l => l.contaId === r.fatura.cardId && l.venc === r.fatura.venc).forEach(l => { l.pagoEm = r.data; });
       res.faturas++; continue;
+    }
+    if (r.status === 'corrigir') {
+      const l = S.lanc.find(x => x.id === r.matchId);
+      /* apaga repetições previstas erradas (ex.: tratada antes como assinatura) e recoloca na fatura certa */
+      if (l.serie) { const sr = l.serie; S.lanc = S.lanc.filter(x => !(x.serie === sr && x.id !== l.id && x.origem === 'previsto')); l.serie = null; }
+      const venc = vencEfetivo(r);
+      Object.assign(l, { parcela: r.parcela, compra: r.data, venc, pago: venc < HOJE, pagoEm: venc < HOJE ? venc : null, fitid: r.fitid, categoria: r.cat });
+      bases.push([l, r]); res.corrigidos++; continue;
     }
     if (r.status === 'match') {
       const l = S.lanc.find(x => x.id === r.matchId);
@@ -1663,7 +1674,7 @@ function confirmarImport() {
       if (!card) { l.pago = true; l.pagoEm = r.data; }
       bases.push([l, r]); res.casados++; continue;
     }
-    const compra = card ? compraEfetiva(r) : null, venc = card ? faturaVenc(c, compra) : r.data, faturaPassada = card && venc < HOJE;
+    const compra = card ? r.data : null, venc = vencEfetivo(r), faturaPassada = card && venc < HOJE;
     const novo = { id: uid(), ownerId: S.session, tipo: r.tipo, descricao: r.desc.slice(0, 80), valor: r.valor, venc, compra, contaId: c.id,
       categoria: r.cat, essencial: r.tipo === 'despesa' ? !!(CATS[r.cat] && CATS[r.cat].e) : true, pago: card ? faturaPassada : true,
       pagoEm: card ? (faturaPassada ? venc : null) : r.data, compartilhado: c.compartilhado, parcela: r.parcela, fitid: r.fitid, origem: 'importado', serie: null };
@@ -1742,12 +1753,13 @@ function drawImport() {
       if (r.status === 'dup') return '<span class="pill neutral">Já importado antes</span>';
       if (r.status === 'pgto') return '<span class="pill neutral">Pagamento da fatura · ignorado</span>';
       if (r.status === 'fatura') return `<span class="pill good">Paga a ${esc(contaLabel(contaById(r.fatura.cardId)))} (vence ${dLabel(r.fatura.venc)})</span>`;
+      if (r.status === 'corrigir') return `<span class="pill warn">Já importado · vou corrigir para parcela ${r.parc.i} de ${r.parc.n} na fatura certa</span>`;
       if (r.status === 'match') { const l = S.lanc.find(x => x.id === r.matchId); return `<span class="pill good">Já lançado: ${esc(l.descricao)}</span>${Math.abs(l.valor - r.valor) > .009 ? `<div class="meta">valor ajustado de ${BRL(l.valor)} para ${BRL(r.valor)}</div>` : ''}`; }
       return `<span class="pill acc">Novo lançamento</span>${r.aprendida ? '<div class="meta">categoria aprendida</div>' : ''}`;
     };
     const fut = r => {
-      if (!['nova', 'match'].includes(r.status) || !r.incluir) return '';
-      if (r.parc && r.parc.i < r.parc.n) return `<label class="check-row small" style="margin-top:6px"><input type="checkbox" data-chg="impfut" data-i="${r.i}" ${r.futuro ? 'checked' : ''}> Lançar ${r.parc.n - r.parc.i === 1 ? `a parcela ${r.parc.n}` : `as parcelas ${r.parc.i + 1} a ${r.parc.n}`} nos próximos ${r.parc.n - r.parc.i === 1 ? 'mês' : r.parc.n - r.parc.i + ' meses'}</label>`;
+      if (!['nova', 'match', 'corrigir'].includes(r.status) || !r.incluir) return '';
+      if (r.parc && r.parc.i < r.parc.n) return `<label class="check-row small" style="margin-top:6px"><input type="checkbox" data-chg="impfut" data-i="${r.i}" ${r.futuro ? 'checked' : ''}> Lançar ${r.parc.n - r.parc.i === 1 ? `a parcela ${r.parc.n} no próximo mês` : `as parcelas ${r.parc.i + 1} a ${r.parc.n} nos próximos ${r.parc.n - r.parc.i} meses`}</label>`;
       if (r.tipo === 'despesa' && !r.parc) return `<label class="check-row small" style="margin-top:6px"><input type="checkbox" data-chg="imprep" data-i="${r.i}" ${r.repetir ? 'checked' : ''}> Assinatura: repetir todo mês</label>`;
       return '';
     };
@@ -1756,7 +1768,7 @@ function drawImport() {
       <div class="row small muted">${imp.formato} · ${esc(imp.nome)} · ${rows.length} transações de ${dLabel(imp.periodo[0])} a ${dLabel(imp.periodo[1])}</div>
       ${imp.aviso ? `<p class="note" style="color:var(--warning)">${esc(imp.aviso)}</p>` : ''}
       <div class="chips">
-        <span class="pill acc">${n('nova')} novas</span><span class="pill good">${n('match')} já lançadas</span>
+        <span class="pill acc">${n('nova')} novas</span><span class="pill good">${n('match')} já lançadas</span>${n('corrigir') ? `<span class="pill warn">${n('corrigir')} para corrigir</span>` : ''}
         ${n('fatura') ? `<span class="pill good">${n('fatura')} pagamento de fatura</span>` : ''}
         ${n('dup') ? `<span class="pill neutral">${n('dup')} já importadas</span>` : ''}${n('pgto') ? `<span class="pill neutral">${n('pgto')} pagamentos ignorados</span>` : ''}
       </div>
@@ -1837,7 +1849,7 @@ document.addEventListener('click', ev => {
     }
     case 'impok': {
       const r = confirmarImport(); save(); closeModal(); render();
-      toast(`Importado: ${r.novos} novos, ${r.casados} já lançados${r.faturas ? ', ' + r.faturas + ' fatura paga' : ''}${r.futuros ? ' · ' + r.futuros + ' lançamentos futuros programados' : ''}${r.regras ? ' · ' + r.regras + ' categoria(s) aprendida(s)' : ''}`); break;
+      toast(`Importado: ${r.novos} novos, ${r.casados} já lançados${r.corrigidos ? ', ' + r.corrigidos + ' corrigidos' : ''}${r.faturas ? ', ' + r.faturas + ' fatura paga' : ''}${r.futuros ? ' · ' + r.futuros + ' lançamentos futuros programados' : ''}${r.regras ? ' · ' + r.regras + ' categoria(s) aprendida(s)' : ''}`); break;
     }
     case 'ctipo': contaTipo = v; contaErr = ''; render(); break;
     case 'ccor': contaCor = v; document.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); break;
